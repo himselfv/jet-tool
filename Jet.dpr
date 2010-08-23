@@ -4,7 +4,7 @@ program Jet;
 
 uses
   SysUtils, Windows, ActiveX, Variants, AdoDb, OleDb, AdoInt, ComObj, WideStrUtils,
-  DAO_TLB,
+  DAO_TLB, ADOX_TLB,
   StringUtils in 'StringUtils.pas';
 
 (*
@@ -126,6 +126,8 @@ var
   stdi, stdo, stde: WideString;
   CrlfBreak: TTriBool = tbDefault;
 
+var //Dynamic properties
+  CanUseDao: boolean; //sometimes there are other ways
 
 procedure ParseCommandLine;
 var i: integer;
@@ -299,6 +301,9 @@ begin
   if NewDb and not ForceNewDb and FileExists(Filename) then
     raise Exception.Create('File '+Filename+' already exists. Cannot create a new one.');
 
+ //Можем ли использовать DAO. Иначе предпочитаем другие варианты.
+  CanUseDao := (Filename<>'');
+
  //Чтобы парсить комменты, требуется DAO, т.е. подключение по имени файла
   if WideSameText(Command, 'exec') and HandleComments then begin
     if not PrivateExtensions then
@@ -375,39 +380,100 @@ const
   Jet3x = 4;
   Jet4x = 5;
 
+var
+  AdoxCatalog: Catalog;
+
+//Creates a new database and resets a database-creation-required flag.
 procedure CreateNewDatabase;
-var Catalog: OleVariant;
 begin
   if ForceNewDb and FileExists(Filename) then
     DeleteFileW(PWideChar(Filename));
-  Catalog := CreateOleObject('ADOX.Catalog');
-  Catalog.Create(ConnectionString
+  AdoxCatalog := CoCatalog.Create;
+  AdoxCatalog.Create(ConnectionString
     + 'Jet OLEDB:Engine Type='+IntToStr(Jet4x)+';');
   if LoggingMode=lmVerbose then
     writeln('Database created.');
   NewDb := false; //works only once
 end;
 
-function EstablishConnection: _Connection;
+function GetAdoConnection: _Connection; forward;
+
+//Returns an ADOX Catalog. Caching is implemented.
+function GetAdoxCatalog: Catalog;
 begin
-  if NewDb then CreateNewDatabase;
-  Result := CoConnection.Create;
-  Result.Open(ConnectionString, User, Password, 0)
+  if AdoxCatalog=nil then begin
+    AdoxCatalog := CoCatalog.Create;
+    AdoxCatalog._Set_ActiveConnection(GetAdoConnection);
+  end;
+  Result := AdoxCatalog;
 end;
 
 var
+  AdoConnection: _Connection;
+
+//Returns an ADO connection. Caching is implemented
+function GetAdoConnection: _Connection;
+begin
+  if NewDb then CreateNewDatabase;
+  if AdoConnection=nil then begin
+    Result := CoConnection.Create;
+    Result.Open(ConnectionString, User, Password, 0);
+    AdoConnection := Result;
+  end else
+    Result := AdoConnection;
+end;
+
+//Returns a NEW ADO connection.
+function EstablishAdoConnection: _Connection;
+begin
+  if NewDb then CreateNewDatabase;
+  Result := CoConnection.Create;
+  Result.Open(ConnectionString, User, Password, 0);
+end;
+
+var
+  DaoEngine: DbEngine;
   DaoConnection: Database;
 
+//Returns a DAO connection. Caching is implemented.
+function GetDaoConnection: Database;
+var Params: OleVariant;
+begin
+  if Assigned(DaoConnection) then begin
+    Result := DaoConnection;
+    exit;
+  end;
+
+  if NewDb then CreateNewDatabase;
+
+  DaoEngine := CoDbEngine.Create;
+  if Filename<>'' then begin
+    if DatabasePassword<>'' then
+      Params := WideString('MS Access;pwd=')+DatabasePassword
+    else
+      Params := '';
+    Result := DaoEngine.OpenDatabase(Filename, False, False, Params);
+  end else
+  if DataSourceName<>'' then begin
+   //Although this will probably not work
+    Params := 'ODBC;DSN='+DataSourceName+';UID='+User+';PWD='+Password+';';
+    Result := DaoEngine.OpenDatabase('', False, False, Params);
+  end else
+    raise Exception.Create('The operation you''re performing apparently requires '
+      +'DAO. DAO and DAO-dependent functions can only be accessed through Filename '
+      +'source. That you see this error must mean somehow this condition was not '
+      +'properly checked during command-line parsing. '#13
+      +'Please file a bug to developers. As for yourself, try to guess which '
+      +'setting required DAO (usually something obscure like importing comments) '
+      +'and either disable that or switch to connecting through Filename.');
+end;
+
+//Establishes a NEW DAO connection. Also refreshes the engine cache.
+//Usually called every time DAO connection is needed by a DAO-dependent proc.
 function EstablishDaoConnection: Database;
 var DbEngine: _DbEngine;
   Params: OleVariant;
 begin
-//If you enable this, Dao refreshing will break for GOD KNOWS WHAT REASONS
-//  if Assigned(DaoConnection) then begin
-//    Result := DaoConnection;
-//    exit;
-//  end;
-
   DbEngine := CoDbEngine.Create;
  //Do not disable, or Dao refreshing will break too
   DbEngine.Idle(dbRefreshCache);
@@ -430,13 +496,14 @@ begin
       +'Please file a bug to developers. As for yourself, try to guess which '
       +'setting required DAO (usually something obscure like importing comments) '
       +'and either disable that or switch to connecting through Filename.');
-
-  DaoConnection := Result;
 end;
 
-procedure ClearDao;
+//This is needed before you CoUninitialize Ole. More notes where this is called.
+procedure ClearOleObjects;
 begin
+  AdoConnection := nil;
   DaoConnection := nil;
+  AdoxCatalog := nil;
 end;
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -445,7 +512,7 @@ end;
 procedure Touch();
 var conn: _Connection;
 begin
-  conn := EstablishConnection;
+  conn := GetAdoConnection;
 end;
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -481,7 +548,7 @@ end;
 procedure PrintSchema();
 var conn: _Connection;
 begin
-  conn := EstablishConnection;
+  conn := GetAdoConnection;
   Dump(conn, 'Tables', adSchemaTables);
   Dump(conn, 'Columns', adSchemaColumns);
 
@@ -520,6 +587,7 @@ type
     NumericScale: OleVariant;
     NumericPrecision: OleVariant;
     CharacterMaximumLength: OleVariant;
+    AutoIncrement: boolean;
   end;
   PColumnDesc = ^TColumnDesc;
 
@@ -559,6 +627,10 @@ begin
   end;
 end;
 
+//Doing this through DAO is slightly faster (OH GOD HOW MUCH DOES ADOX SUCK),
+//but DAO can only be used with -f, so effectively we just strip out all
+//the other options.
+
 function GetTableText(conn: _Connection; Table: WideString): WideString;
 var rs: _Recordset;
   Columns: TColumns;
@@ -566,9 +638,16 @@ var rs: _Recordset;
   s, dts: string;
   tmp: OleVariant;
   pre, scal: OleVariant;
+  AdoxTable: ADOX_TLB.Table;
+  DaoTable: DAO_TLB.TableDef;
 begin
   rs := conn.OpenSchema(adSchemaColumns,
     VarArrayOf([Unassigned, Unassigned, Table, Unassigned]), EmptyParam);
+
+  if CanUseDao then //filename connection
+    DaoTable := GetDaoConnection.TableDefs[Table]
+  else
+    AdoxTable := GetAdoxCatalog.Tables[Table];
 
  //Reading data
   Columns.Clear;
@@ -592,6 +671,12 @@ begin
     Column.NumericPrecision := rs.Fields['NUMERIC_PRECISION'].Value;
     Column.NumericScale := rs.Fields['NUMERIC_SCALE'].Value;
     Column.CharacterMaximumLength := rs.Fields['CHARACTER_MAXIMUM_LENGTH'].Value;
+
+    if CanUseDao then
+      Column.AutoIncrement := Includes(cardinal(DaoTable.Fields[Column.Name].Attributes), dbAutoIncrField)
+    else
+      Column.AutoIncrement := AdoxTable.Columns[Column.Name].Properties['AutoIncrement'].Value;
+
     Columns.Add(Column);
     rs.MoveNext;
   end;
@@ -602,6 +687,9 @@ begin
   Result := '';
   for Column in Columns.data do begin
 
+    if Column.AutoIncrement then
+      dts := 'COUNTER' //special access data type, also known as AUTOINCREMENT
+    else
    //Data type
     case Column.DataType of
       DBTYPE_I1: dts := 'TINYINT';
@@ -745,7 +833,7 @@ end;
 procedure DumpSql();
 var conn: _Connection;
 begin
-  conn := EstablishConnection;
+  conn := GetAdoConnection;
   writeln('/* Access SQL export data follows. Auto-generated. */'#13#10);
 
  //Tables
@@ -875,8 +963,8 @@ begin
     writeln(msg);
 end;
 
-procedure daoSetOrAdd(Dao: Database; Props: Properties; Name, Value: WideString);
-var Prop: Property_;
+procedure daoSetOrAdd(Dao: Database; Props: DAO_TLB.Properties; Name, Value: WideString);
+var Prop: DAO_TLB.Property_;
 begin
   try
     Props.Item[Name].Value := Value;
@@ -1013,7 +1101,7 @@ procedure ExecSql();
 var conn: _Connection;
   cmd: WideString;
 begin
-  conn := EstablishConnection;
+  conn := GetAdoConnection;
   while ReadNextCmd(cmd) do
     ExecCmd(conn, cmd);
 end;
@@ -1078,7 +1166,7 @@ begin
       BadUsage('No command specified')
     else
       BadUsage('Unsupported command: '+Command);
-    ClearDao(); //or else it'll stay till finalization when Ole is long gone.
+    ClearOleObjects(); //or else it'll stay till finalization when Ole is long gone.
    //Also it's paramount that we nil it inside of the function: Delphi will not
    //actually derefcount it until we exit the scope of where we nil it.
     CoUninitialize();
