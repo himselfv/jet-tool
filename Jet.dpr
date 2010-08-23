@@ -21,6 +21,32 @@ uses
     -1 :: Generic error
     -2 :: Usage error
     -3 :: OLE Error
+
+  What this thing dumps:
+    Tables
+      Comments
+      Fields
+        Standard field markers [not null, default]
+        Auto-increment
+        Comments
+    Indexes
+      Multi- and single-type indexes
+      Standard markers [unique, disallow null, ignore null, primary key]
+    Foreign keys
+    Views
+
+  What can be added in the future:
+    Check constraints
+    Rest of the "table constraints"
+    Stored procedures
+
+  A note about constraints. There are:
+    Check constraints :: added through SQL, unrelated to anything else
+    Referential constraints :: automatically generated for foreign keys
+    Unique index constraints :: automatically added for every UNIQUE index
+    Manual table constraints :: any other constraints added manually through
+      ADD CONSTRAINT which are not CHECK CONSTRAINT.
+  All of these compose "Table constraints".
 *)
 
 {$UNDEF DEBUG}
@@ -549,21 +575,26 @@ procedure PrintSchema();
 var conn: _Connection;
 begin
   conn := GetAdoConnection;
+//  Dump(conn, 'Catalogs', adSchemaCatalogs); ---not supported by Access
   Dump(conn, 'Tables', adSchemaTables);
   Dump(conn, 'Columns', adSchemaColumns);
 
-  Dump(conn, 'Check constaints', adSchemaCheckConstraints);
-  Dump(conn, 'Referential constaints', adSchemaReferentialConstraints);
-  Dump(conn, 'Table constaints', adSchemaTableConstraints);
+//  Dump(conn, 'Asserts', adSchemaAsserts); ---not supported by Access
+  Dump(conn, 'Check constraints', adSchemaCheckConstraints);
+  Dump(conn, 'Referential constraints', adSchemaReferentialConstraints);
+  Dump(conn, 'Table constraints', adSchemaTableConstraints);
 
   Dump(conn, 'Column usage', adSchemaConstraintColumnUsage);
   Dump(conn, 'Key column usage', adSchemaKeyColumnUsage);
 //  Dump(conn, 'Table usage', adSchemaConstraintTableUsage); --- not supported by Access
 
   Dump(conn, 'Indexes', adSchemaIndexes);
+  Dump(conn, 'Primary keys', adSchemaPrimaryKeys);
   Dump(conn, 'Foreign keys', adSchemaForeignKeys);
 
 //  Dump(conn, 'Asserts', adSchemaAsserts); ---not supported by Access
+
+//  Dump(conn, 'Properties', adSchemaProperties); ---not supported by Access
 end;
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -627,10 +658,6 @@ begin
   end;
 end;
 
-//Doing this through DAO is slightly faster (OH GOD HOW MUCH DOES ADOX SUCK),
-//but DAO can only be used with -f, so effectively we just strip out all
-//the other options.
-
 function GetTableText(conn: _Connection; Table: WideString): WideString;
 var rs: _Recordset;
   Columns: TColumns;
@@ -641,14 +668,16 @@ var rs: _Recordset;
   AdoxTable: ADOX_TLB.Table;
   DaoTable: DAO_TLB.TableDef;
 begin
-  rs := conn.OpenSchema(adSchemaColumns,
-    VarArrayOf([Unassigned, Unassigned, Table, Unassigned]), EmptyParam);
-
+ //Doing this through DAO is slightly faster (OH GOD HOW MUCH DOES ADOX SUCK),
+ //but DAO can only be used with -f, so effectively we just strip out all
+ //the other options.
   if CanUseDao then //filename connection
     DaoTable := GetDaoConnection.TableDefs[Table]
   else
     AdoxTable := GetAdoxCatalog.Tables[Table];
 
+  rs := conn.OpenSchema(adSchemaColumns,
+    VarArrayOf([Unassigned, Unassigned, Table, Unassigned]), EmptyParam);
  //Reading data
   Columns.Clear;
   while not rs.EOF do begin
@@ -686,11 +715,10 @@ begin
  //Building string
   Result := '';
   for Column in Columns.data do begin
-
+   //Data type
     if Column.AutoIncrement then
       dts := 'COUNTER' //special access data type, also known as AUTOINCREMENT
     else
-   //Data type
     case Column.DataType of
       DBTYPE_I1: dts := 'TINYINT';
       DBTYPE_I2: dts := 'SMALLINT';
@@ -763,6 +791,256 @@ begin
   end;
 end;
 
+
+type
+  TIndexColumnDesc = record
+    Name: WideString;
+    Collation: integer;
+    OrdinalPosition: integer;
+  end;
+  PIndexColumnDesc = ^TIndexColumnDesc;
+
+  TIndexDesc = record
+    Name: WideString;
+    PrimaryKey: boolean;
+    Unique: boolean;
+    Nulls: integer; //DBPROP_IN_*
+    Columns: array of TIndexColumnDesc;
+    _Initialized: boolean; //indicates that the object properties has been set
+    _Declared: boolean; //set after index has been declared inline [field definition]
+    function ContainsColumn(ColumnName: WideString): boolean;
+    function AddColumn(ColumnName: WideString): PIndexColumnDesc;
+    procedure SortColumns;
+  end;
+  PIndexDesc = ^TIndexDesc;
+
+  TIndexes = record
+    data: array of TIndexDesc;
+    procedure Clear;
+    function Find(IndexName: WideString): PIndexDesc;
+    function Get(IndexName: WideString): PIndexDesc;
+  end;
+
+function TIndexDesc.ContainsColumn(ColumnName: WideString): boolean;
+var i: integer;
+begin
+  Result := false;
+  for i := 0 to Length(Columns) - 1 do
+    if WideSameText(ColumnName, Columns[i].Name) then begin
+      Result := true;
+      break;
+    end;
+end;
+
+function TIndexDesc.AddColumn(ColumnName: WideString): PIndexColumnDesc;
+begin
+  if ContainsColumn(ColumnName) then begin
+    Result := nil;
+    exit;
+  end;
+  SetLength(Columns, Length(Columns)+1);
+  Result := @Columns[Length(Columns)-1];
+  Result.Name := ColumnName;
+  Result.Collation := 0; 
+end;
+
+procedure TIndexDesc.SortColumns;
+var i, j, k: integer;
+  tmp: TIndexColumnDesc;
+begin
+  for i := 1 to Length(Columns) - 1 do begin
+    j := i-1;
+    while (j >= 0) and (Columns[i].OrdinalPosition < Columns[j].OrdinalPosition) do
+      Dec(j);
+    Inc(j);
+    if j<>i then begin
+      tmp := Columns[i];
+      for k := i downto j+1 do
+        Columns[k] := Columns[k-1];
+      Columns[j] := tmp;
+    end;
+  end;
+end;
+
+procedure TIndexes.Clear;
+begin
+  SetLength(data, 0);
+end;
+
+function TIndexes.Find(IndexName: WideString): PIndexDesc;
+var i: integer;
+begin
+  Result := nil;
+  for i := 0 to Length(data) - 1 do
+    if WideSameText(IndexName, data[i].Name) then begin
+      Result := @data[i];
+      break;
+    end;
+end;
+
+function TIndexes.Get(IndexName: WideString): PIndexDesc;
+begin
+  Result := Find(IndexName);
+  if Result<>nil then exit;
+
+  SetLength(data, Length(data)+1);
+  Result := @data[Length(data)-1];
+  Result^.Name := IndexName;
+  Result._Initialized := false;
+  Result._Declared := false;
+end;
+
+type
+  TConstraintDesc = record
+    Name: WideString;
+  end;
+  PConstraintDesc = ^TConstraintDesc;
+
+  TConstraints = record
+    data: array of TConstraintDesc;
+    procedure Clear;
+    function Find(ConstraintName: WideString): PConstraintDesc;
+    procedure Add(ConstraintName: WideString);
+  end;
+
+procedure TConstraints.Clear;
+begin
+  SetLength(Data, 0);
+end;
+
+function TConstraints.Find(ConstraintName: WideString): PConstraintDesc;
+var i: integer;
+begin
+  Result := nil;
+  for i := 0 to Length(data) - 1 do
+    if WideSameText(ConstraintName, data[i].Name) then begin
+      Result := @data[i];
+      break;
+    end;
+end;
+
+procedure TConstraints.Add(ConstraintName: WideString);
+var Constraint: PConstraintDesc;
+begin
+  Constraint := Find(ConstraintName);
+  if Constraint <> nil then exit;
+  SetLength(data, Length(data)+1);
+  data[Length(data)-1].Name := ConstraintName;
+end;
+
+//Returns CONSTRAINT list for a given table.
+function GetTableIndexes(conn: _Connection; Table: WideString): TIndexes;
+var rs: _Recordset;
+  Index: PIndexDesc;
+  IndexName: WideString;
+  Column: PIndexColumnDesc;
+  Constraints: TConstraints;
+begin
+ //First we read table constraints to filter out those indexes which are constraint-related
+  rs := conn.OpenSchema(adSchemaTableConstraints,
+    VarArrayOf([Unassigned, Unassigned, Unassigned, Unassigned,
+      Unassigned, Table, 'FOREIGN KEY']), EmptyParam);
+  Constraints.Clear;
+  while not rs.EOF do begin
+    Constraints.Add(str(rs.Fields['CONSTRAINT_NAME'].Value));
+    rs.MoveNext();
+  end;
+
+ //Indexes
+  rs := conn.OpenSchema(adSchemaIndexes,
+    VarArrayOf([Unassigned, Unassigned, Unassigned, Unassigned, Table]), EmptyParam);
+
+ //Reading data
+  Result.Clear;
+  while not rs.EOF do begin
+    IndexName := str(rs.Fields['INDEX_NAME'].Value);
+
+   //Ignore constraint-related indexes
+    if Constraints.Find(IndexName)<>nil then begin
+      rs.MoveNext;
+      continue;
+    end;
+
+    Index := Result.Get(IndexName);
+    if not Index._Initialized then begin
+     //Supposedly these values should be the same for all the records belonging to the same index
+      Index.PrimaryKey := rs.Fields['PRIMARY_KEY'].Value;
+      Index.Unique := rs.Fields['UNIQUE'].Value;
+      Index.Nulls := int(rs.Fields['NULLS'].Value);
+    end;
+
+    Column := Index.AddColumn(str(rs.Fields['COLUMN_NAME'].Value));
+    if Column<>nil then begin //wasn't defined yet -- the usual case
+      Column.Collation := int(rs.Fields['COLLATION'].Value);
+      Column.OrdinalPosition := int(rs.Fields['ORDINAL_POSITION'].Value);
+    end;
+    
+    rs.MoveNext;
+  end;
+end;
+
+//Dumps index creation commands for a given table
+procedure DumpIndexes(conn: _Connection; TableName: string);
+var Indexes: TIndexes;
+  Index: PIndexDesc;
+  i, j: integer;
+  s, fl, tmp: WideString;
+  Multiline: boolean;
+begin
+  Indexes := GetTableIndexes(conn, TableName);
+  for i := 0 to Length(Indexes.data) - 1 do begin
+    Index := @Indexes.data[i];
+    Index.SortColumns;
+
+    if Index.Unique then
+      s := 'CREATE UNIQUE INDEX ['
+    else
+      s := 'CREATE INDEX [';
+    s := s + Index.Name + '] ON [' + TableName + ']';
+
+    fl := '';
+    Multiline := false;
+    for j := 0 to Length(Index.Columns) - 1 do begin
+      tmp := Index.Columns[j].Name;
+      case Index.Columns[j].Collation of
+        DB_COLLATION_ASC: tmp := tmp + ' ASC';
+        DB_COLLATION_DESC: tmp := tmp + ' DESC';
+      end;
+      if fl<>'' then begin
+        fl := fl + ','#13#10 + tmp;
+        Multiline := true;
+      end else
+        fl := tmp;
+    end;
+
+    if Multiline then
+      s := s + ' ('#13#10 + fl + #13#10 + ')'
+    else
+      s := s + ' (' + fl + ')';
+
+    if Index.PrimaryKey or (Index.Nulls=DBPROPVAL_IN_DISALLOWNULL)
+    or (Index.Nulls=DBPROPVAL_IN_IGNORENULL) then begin
+      s := s + ' WITH';
+      if Index.PrimaryKey then
+        s := s + ' PRIMARY';
+      if Index.Nulls=DBPROPVAL_IN_DISALLOWNULL then
+        s := s + ' DISALLOW NULL'
+      else
+      if Index.Nulls=DBPROPVAL_IN_IGNORENULL then
+        s := s + ' IGNORE NULL';
+    end;
+
+    s := s + ';';
+    writeln(s);
+  end;
+end;
+
+//Dumps foreign key creation commands for a given table
+procedure DumpForeignKeys(conn: _Connection; TableName: WideString);
+begin
+
+end;
+
 procedure DumpTables(conn: _Connection);
 var rs: _Recordset;
   TableName: WideString;
@@ -778,7 +1056,7 @@ begin
       if PrivateExtensions then
         writeln('DROP TABLE ['+TableName+'] /**WEAK**/;')
       else
-        writeln('DROP TABLE ['+TableName+'];');    
+        writeln('DROP TABLE ['+TableName+'];');
     writeln('CREATE TABLE ['+TableName+'] (');
     writeln(GetTableText(conn, TableName));
     if HandleComments and (Description<>'') then
@@ -788,9 +1066,23 @@ begin
         writeln(') /* '+Description+' */')
     else
       writeln(');');
+    DumpIndexes(conn, TableName);
     writeln('');
     rs.MoveNext();
   end;
+
+(*
+ //One more time, with foreign keys
+  if rs.BOF then exit;
+  rs.MoveFirst();
+  while not rs.EOF do begin
+    TableName := str(rs.Fields['TABLE_NAME'].Value);
+    DumpForeignKeys(conn, TableName);
+
+    writeln('');
+    rs.MoveNext();
+  end;
+ *)
 end;
 
 procedure DumpViews(conn: _Connection);
