@@ -4,7 +4,7 @@ program Jet;
 
 uses
   SysUtils, Windows, ActiveX, Variants, AdoDb, OleDb, AdoInt, ComObj, WideStrUtils,
-  CodepageUtils, DAO_TLB,
+  DAO_TLB,
   StringUtils in 'StringUtils.pas';
 
 (*
@@ -964,7 +964,7 @@ begin
       end;
 
       if (Errors=emIgnore) and (LoggingMode<>lmSilent) then
-        writeln(E.Classname + ': ' + WinToOem(E.Message) + '(0x' + IntToHex(E.ErrorCode, 8) + ')');
+        writeln(E.Classname + ': ' + E.Message + '(0x' + IntToHex(E.ErrorCode, 8) + ')');
       if Errors<>emIgnore then
         raise; //Re-raise it to be caught in Main()
       exit; //else just exit
@@ -973,7 +973,7 @@ begin
       writeln('');
       writeln('Error while executing: ');
       writeln(tr_cmd);
-      writeln(E.Classname + ': ' + WinToOem(E.Message));
+      writeln(E.Classname + ': ' + E.Message);
       raise;
     end;
   end;
@@ -1090,11 +1090,11 @@ begin
       ExitCode := -2;
     end;
     on E:EOleException do begin
-      writeln(E.Classname + ': ' + WinToOem(E.Message) + '(0x' + IntToHex(E.ErrorCode, 8) + ')');
+      writeln(E.Classname + ': ' + E.Message + '(0x' + IntToHex(E.ErrorCode, 8) + ')');
       ExitCode := -3;
     end;
     on E:Exception do begin
-      Writeln(E.Classname, ': ', WinToOem(E.Message));
+      Writeln(E.Classname, ': ', E.Message);
       ExitCode := -1;
     end;
   end;
