@@ -12,12 +12,12 @@ uses
     /**COMMENT* [comment text] */  - table, field or view comment
     /**WEAK**/ - ignore errors for this command (handy for DROP TABLE/VIEW)
 
-  By default when reading from keyboard:
+  By default when reading from keyboard these are set:
     --ignore-errors
     --crlf-break
     --verbose
 
-  Return codes:
+  Returns error codes:
     -1 :: Generic error
     -2 :: Usage error
     -3 :: OLE Error
@@ -47,6 +47,10 @@ uses
     Manual table constraints :: any other constraints added manually through
       ADD CONSTRAINT which are not CHECK CONSTRAINT.
   All of these compose "Table constraints".
+
+  OpenSchema documentation:
+    http://msdn.microsoft.com/en-us/library/ms675274(VS.85).aspx  :: Schema identifiers
+    http://msdn.microsoft.com/en-us/library/ee265709(BTS.10).aspx  :: Some of the schemas, documented
 *)
 
 {$UNDEF DEBUG}
@@ -592,8 +596,6 @@ begin
   Dump(conn, 'Primary keys', adSchemaPrimaryKeys);
   Dump(conn, 'Foreign keys', adSchemaForeignKeys);
 
-//  Dump(conn, 'Asserts', adSchemaAsserts); ---not supported by Access
-
 //  Dump(conn, 'Properties', adSchemaProperties); ---not supported by Access
 end;
 
@@ -967,6 +969,7 @@ begin
       Index.PrimaryKey := rs.Fields['PRIMARY_KEY'].Value;
       Index.Unique := rs.Fields['UNIQUE'].Value;
       Index.Nulls := int(rs.Fields['NULLS'].Value);
+      Index._Initialized := true;
     end;
 
     Column := Index.AddColumn(str(rs.Fields['COLUMN_NAME'].Value));
@@ -1035,10 +1038,154 @@ begin
   end;
 end;
 
+type
+  TForeignColumn = record
+    PrimaryKey: WideString;
+    ForeignKey: WideString;
+    Ordinal: integer;
+  end;
+  PForeignColumn = ^TForeignColumn;
+
+  TForeignKey = record
+    Name: WideString;
+    PrimaryTable: WideString;
+    Columns: array of TForeignColumn;
+    OnUpdate: WideString;
+    OnDelete: WideString;
+    _Initialized: boolean;
+    procedure SortColumns;
+    function AddColumn: PForeignColumn;
+  end;
+  PForeignKey = ^TForeignKey;
+
+  TForeignKeys = record
+    data: array of TForeignKey;
+    procedure Clear;
+    function Find(ForeignKeyName: WideString): PForeignKey;
+    function Get(ForeignKeyName: WideString): PForeignKey;
+  end;
+
+procedure TForeignKey.SortColumns;
+var i, j, k: integer;
+  tmp: TForeignColumn;
+begin
+  for i := 1 to Length(Columns) - 1 do begin
+    j := i-1;
+    while (j >= 0) and (Columns[i].Ordinal < Columns[j].Ordinal) do
+      Dec(j);
+    Inc(j);
+    if j<>i then begin
+      tmp := Columns[i];
+      for k := i downto j+1 do
+        Columns[k] := Columns[k-1];
+      Columns[j] := tmp;
+    end;
+  end;
+end;
+
+function TForeignKey.AddColumn: PForeignColumn;
+begin
+  SetLength(Columns, Length(Columns)+1);
+  Result := @Columns[Length(Columns)-1];
+end;
+
+procedure TForeignKeys.Clear;
+begin
+  SetLength(data, 0);
+end;
+
+function TForeignKeys.Find(ForeignKeyName: WideString): PForeignKey;
+var i: integer;
+begin
+  Result := nil;
+  for i := 0 to Length(data) - 1 do
+    if WideSameText(ForeignKeyName, data[i].Name) then begin
+      Result := @data[i];
+      break;
+    end;
+end;
+
+function TForeignKeys.Get(ForeignKeyName: WideString): PForeignKey;
+begin
+  Result := Find(ForeignKeyName);
+  if Result <> nil then exit;
+  SetLength(data, Length(data)+1);
+  Result := @data[Length(data)-1];
+  Result.Name := ForeignKeyName;
+  Result._Initialized := false;
+end;
+
 //Dumps foreign key creation commands for a given table
 procedure DumpForeignKeys(conn: _Connection; TableName: WideString);
+var rs: _Recordset;
+  ForKeys: TForeignKeys;
+  ForKey: PForeignKey;
+  s, s_for, s_ref: WideString;
+  i, j: integer;
 begin
+  rs := conn.OpenSchema(adSchemaForeignKeys,
+    VarArrayOf([Unassigned, Unassigned, Unassigned,
+      Unassigned, Unassigned, TableName]), EmptyParam);
+  ForKeys.Clear;
+  while not rs.EOF do begin
+    ForKey := ForKeys.Get(str(rs.Fields['FK_NAME'].Value));
+    if not ForKey._Initialized then begin
+      ForKey.PrimaryTable := str(rs.Fields['PK_TABLE_NAME'].Value);
+      ForKey.OnUpdate := str(rs.Fields['UPDATE_RULE'].Value);
+      ForKey.OnDelete := str(rs.Fields['DELETE_RULE'].Value);
 
+     //These are used internally when no action is defined.
+     //Maybe they would have worked in CONSTRAINT too, but let's follow the standard.   
+      if WideSameText(ForKey.OnUpdate, 'NO ACTION') then
+        ForKey.OnUpdate := '';
+      if WideSameText(ForKey.OnDelete, 'NO ACTION') then
+        ForKey.OnDelete := '';
+
+      ForKey._Initialized := true;
+    end;
+
+    with ForKey.AddColumn^ do begin
+      PrimaryKey := str(rs.Fields['PK_COLUMN_NAME'].Value);
+      ForeignKey := str(rs.Fields['FK_COLUMN_NAME'].Value);
+      Ordinal := int(rs.Fields['ORDINAL'].Value);
+    end;
+
+    rs.MoveNext;
+  end;
+
+  if Length(ForKeys.data)>0 then
+    writeln('/* Foreign keys for '+TableName+' */');
+
+  for i := 0 to Length(ForKeys.data) - 1 do begin
+    ForKey := @ForKeys.Data[i];
+    ForKey.SortColumns;
+
+    s := 'ALTER TABLE ['+TableName+'] ADD CONSTRAINT ['+ForKey.Name+'] FOREIGN KEY (';
+
+    if Length(ForKey.Columns)<=0 then begin
+      Warning('Foreign key '+ForKey.Name+' has a definition but no columns. '
+        +'This is pretty damn strange, mail a detailed bug report please.');
+    end;
+
+    s_for := ForKey.Columns[0].ForeignKey;
+    s_ref := ForKey.Columns[0].PrimaryKey;
+    for j := 1 to Length(ForKey.Columns) - 1 do begin
+      s_for := s_for + ', ' + ForKey.Columns[j].ForeignKey;
+      s_ref := s_ref + ', ' + ForKey.Columns[j].PrimaryKey;
+    end;
+
+    s := s + s_for + ') REFERENCES ['+ForKey.PrimaryTable+'] (' + s_ref + ')';
+    if ForKey.OnUpdate<>'' then
+      s := s  + ' ON UPDATE '+ForKey.OnUpdate;
+    if ForKey.OnDelete<>'' then
+      s := s  + ' ON DELETE '+ForKey.OnDelete;
+
+    s := s + ';';
+    writeln(s);
+  end;
+
+  if Length(ForKeys.data)>0 then
+    writeln('');
 end;
 
 procedure DumpTables(conn: _Connection);
@@ -1071,18 +1218,14 @@ begin
     rs.MoveNext();
   end;
 
-(*
  //One more time, with foreign keys
   if rs.BOF then exit;
   rs.MoveFirst();
   while not rs.EOF do begin
     TableName := str(rs.Fields['TABLE_NAME'].Value);
     DumpForeignKeys(conn, TableName);
-
-    writeln('');
     rs.MoveNext();
   end;
- *)
 end;
 
 procedure DumpViews(conn: _Connection);
