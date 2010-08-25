@@ -4,7 +4,7 @@ program Jet;
 
 uses
   SysUtils, Windows, ActiveX, Variants, AdoDb, OleDb, AdoInt, ComObj, WideStrUtils,
-  DAO_TLB, ADOX_TLB,
+  DAO_TLB, ADOX_TLB, CodepageUtils,                
   StringUtils in 'StringUtils.pas';
 
 (*
@@ -17,10 +17,17 @@ uses
     --crlf-break
     --verbose
 
+  These are dumped by default:
+    --tables
+    --views
+    --relations
+    --comments
+    --private-extensions
+
   Returns error codes:
-    -1 :: Generic error
-    -2 :: Usage error
-    -3 :: OLE Error
+    1 :: Generic error
+    2 :: Usage error
+    3 :: OLE Error
 
   What this thing dumps:
     Tables
@@ -51,74 +58,82 @@ uses
   OpenSchema documentation:
     http://msdn.microsoft.com/en-us/library/ms675274(VS.85).aspx  :: Schema identifiers
     http://msdn.microsoft.com/en-us/library/ee265709(BTS.10).aspx  :: Some of the schemas, documented
+    http://msdn.microsoft.com/en-us/library/ms714540(VS.85).aspx  :: Access data types 
 *)
 
 {$UNDEF DEBUG}
+
+//Writes a string to error output.
+//All errors, usage info, hints go here. Redirect it somewhere if you don't need it.
+procedure err(msg: WideString);
+begin
+  writeln(ErrOutput, msg);
+end;
 
 type
   EUsage = class(Exception);
 
 procedure PrintShortUsage;
 begin
-  writeln('Do "jet help" for extended info.');
+  err('Do "jet help" for extended info.');
 end;
 
 procedure PrintUsage;
 begin
-  writeln('Usage:');
-  writeln('  jet <command> [params]');
-  writeln('');
-  writeln('Commands:');
-  writeln('  jet touch :: connect to database and quit');
-  writeln('  jet dump :: dump sql schema');
-  writeln('  jet exec :: parse sql from input');
-  writeln('  jet schema :: output internal jet schema reports');
-  writeln('');
-  writeln('Connection params:');
-  writeln('  -c [connection-string] :: uses an ADO connection string. -dp is ignored');
-  writeln('  -dsn [data-source-name] :: uses an ODBC data source name');
-  writeln('  -f [file.mdb] :: opens a jet database file');
-  writeln('  -u [user]');
-  writeln('  -p [password]');
-  writeln('  -dp [database password]'); {Works fine with database creation too}
-  writeln('  -new :: works only with exec and filename');
-  writeln('  -force :: overwrite existing database (requires -new)');
-  writeln('You cannot use -c with --comments when executing (dumping is fine).');
-  writeln('You can only use -new with -f.');
+  err('Usage:');
+  err('  jet <command> [params]');
+  err('');
+  err('Commands:');
+  err('  jet touch :: connect to database and quit');
+  err('  jet dump :: dump sql schema');
+  err('  jet exec :: parse sql from input');
+  err('  jet schema :: output internal jet schema reports');
+  err('');
+  err('Connection params:');
+  err('  -c [connection-string] :: uses an ADO connection string. -dp is ignored');
+  err('  -dsn [data-source-name] :: uses an ODBC data source name');
+  err('  -f [file.mdb] :: opens a jet database file');
+  err('  -u [user]');
+  err('  -p [password]');
+  err('  -dp [database password]'); {Works fine with database creation too}
+  err('  -new :: works only with exec and filename');
+  err('  -force :: overwrite existing database (requires -new)');
+  err('You cannot use -c with --comments when executing (dumping is fine).');
+  err('You can only use -new with -f.');
  (* -dsn will probably not work with --comments too, as long as it really is MS Access DSN. They deny DAO DSN connections. *)
-  writeln('');
-  writeln('Useful IO tricks:');
-  writeln('  -stdi [filename] :: sets standard input');
-  writeln('  -stdo [filename] :: sets standard output');
-  writeln('  -stde [filename] :: sets standard error console');
-  writeln('This is only applied after the command-line parsing is over');
-  writeln('');
-  writeln('What to include and whatnot for dumping:');
-  writeln('  --no-tables, --tables');
-  writeln('  --no-views, --views');
-  writeln('  --no-procedures, --procedures');
-  writeln('  --no-comments, --comments :: how comments are dumped depends on if private extensions are enabled');
-  writeln('  --no-drop, --drop :: "DROP" tables etc before creating');
-  writeln('');
-  writeln('Works both for dumping and executing:');
-  writeln('  --no-private-extensions, --private-extensions :: disables dumping/parsing private extensions (check help)');
-  writeln('');
-  writeln('What to do with errors when executing:');
-  writeln('  --silent :: do not print anything (at all)');
-  writeln('  --verbose :: echo commands which are being executed');
-  writeln('  --ignore-errors :: continue on error');
-  writeln('  --stop-on-errors :: exit with error code');
-  writeln('  --crlf-break :: CR/LF ends command');
-  writeln('  --no-crlf-break');
-  writeln('With private extensions enabled, **WEAK** commands do not produce errors in any way (messages, stop).')
+  err('');
+  err('Useful IO tricks:');
+  err('  -stdi [filename] :: sets standard input');
+  err('  -stdo [filename] :: sets standard output');
+  err('  -stde [filename] :: sets standard error console');
+  err('These are only applied after the command-line parsing is over');
+  err('');
+  err('What to include and whatnot for dumping:');
+  err('  --no-tables, --tables');
+  err('  --no-views, --views');
+  err('  --no-procedures, --procedures');
+  err('  --no-comments, --comments :: how comments are dumped depends on if private extensions are enabled');
+  err('  --no-drop, --drop :: "DROP" tables etc before creating');
+  err('');
+  err('Works both for dumping and executing:');
+  err('  --no-private-extensions, --private-extensions :: disables dumping/parsing private extensions (check help)');
+  err('');
+  err('What to do with errors when executing:');
+  err('  --silent :: do not print anything (at all)');
+  err('  --verbose :: echo commands which are being executed');
+  err('  --ignore-errors :: continue on error');
+  err('  --stop-on-errors :: exit with error code');
+  err('  --crlf-break :: CR/LF ends command');
+  err('  --no-crlf-break');
+  err('With private extensions enabled, **WEAK** commands do not produce errors in any way (messages, stop).')
 end;
 
-procedure BadUsage(msg: string='');
+procedure BadUsage(msg: WideString='');
 begin
   raise EUsage.Create(msg);
 end;
 
-procedure Redefined(term, old, new: string);
+procedure Redefined(term: string; old, new: WideString);
 begin
   raise EUsage.Create(term+' already defined: '+old+'. Cannot redefine to "'+new+'".');
 end;
@@ -145,7 +160,10 @@ var
  //Dump contents
   NeedDumpTables: boolean = true;
   NeedDumpViews: boolean = true;
-  NeedDumpProcedures: boolean = false; //TODO: enable by default when ready
+  NeedDumpProcedures: boolean = false;
+  NeedDumpRelations: boolean = true;
+  NeedDumpCheckConstraints: boolean = false;
+ //Dump options
   HandleComments: boolean = true;
   PrivateExtensions: boolean = true;
   DropObjects: boolean = true;
@@ -224,6 +242,7 @@ begin
       ForceNewDb := true;
     end else
 
+   //What to dump
     if WideSameText(s, '--tables') then begin
       NeedDumpTables := true;
     end else
@@ -242,6 +261,20 @@ begin
     if WideSameText(s, '--no-procedures') then begin
       NeedDumpProcedures := false;
     end else
+    if WideSameText(s, '--relations') then begin
+      NeedDumpRelations := true;
+    end else
+    if WideSameText(s, '--no-relations') then begin
+      NeedDumpRelations := false;
+    end else
+    if WideSameText(s, '--check-constraints') then begin
+      NeedDumpCheckConstraints := true;
+    end else
+    if WideSameText(s, '--no-check-constraints') then begin
+      NeedDumpCheckConstraints := false;
+    end else
+
+   //Dump options
     if WideSameText(s, '--comments') then begin
       HandleComments := true; {when dumping this means DUMP comments, else PARSE comments - requires PrivateExt}
     end else
@@ -322,8 +355,8 @@ begin
     BadUsage('Database creation is supported only when connecting by Filename.');
   if NewDb and (WideSameText(Command, 'dump') or WideSameText(Command, 'schema'))
   and (LoggingMode=lmVerbose) then begin
-    writeln('NOTE: You asked to create database and then dump its contents.');
-    writeln('What the hell are you trying to do?');
+    err('NOTE: You asked to create database and then dump its contents.');
+    err('What the hell are you trying to do?');
   end;
   if ForceNewDb and not NewDb then
     BadUsage('-force requires -new');
@@ -602,9 +635,16 @@ end;
 ////////////////////////////////////////////////////////////////////////////////
 /// DumpSql --- Dumps database contents
 
+(*
+ Writes a warning to a generated file. If we're not in silent mode, outputs it as a error too.
+ This should be used in cases where the warning is really important (something cannot be done,
+ some information ommited). If you just want to give a hint, use "err(msg)";
+*)
 procedure Warning(msg: WideString);
 begin
   writeln('/* !!! Warning: '+msg+' */');
+  if LoggingMode<>lmSilent then
+    err('Warning: '+msg);
 end;
 
 type
@@ -752,11 +792,17 @@ begin
       end;
       DBTYPE_BOOL: dts := 'BIT';
 
-      DBTYPE_BYTES: dts := 'BINARY';
+      DBTYPE_BYTES:
+        if Includes(Column.Flags, DBCOLUMNFLAGS_ISLONG) then
+          dts := 'LONGBINARY'
+        else
+          dts := 'BINARY';
+
       DBTYPE_WSTR:
        //If you specify TEXT, Access makes LONGTEXT (Memo) field, if TEXT(len) then the usual limited text.
+       //But we'll go a safe route.
         if Includes(Column.Flags, DBCOLUMNFLAGS_ISLONG) then
-          dts := 'TEXT' //"Memo field"
+          dts := 'LONGTEXT' //"Memo field"
         else begin
           if VarIsNil(Column.CharacterMaximumLength) then begin
             Warning('Null CHARACTER_MAXIMUM_LENGTH although DBCOLUMNFLAGS_ISLONG '
@@ -1135,7 +1181,7 @@ begin
       ForKey.OnDelete := str(rs.Fields['DELETE_RULE'].Value);
 
      //These are used internally when no action is defined.
-     //Maybe they would have worked in CONSTRAINT too, but let's follow the standard.   
+     //Maybe they would have worked in CONSTRAINT too, but let's follow the standard.
       if WideSameText(ForKey.OnUpdate, 'NO ACTION') then
         ForKey.OnUpdate := '';
       if WideSameText(ForKey.OnDelete, 'NO ACTION') then
@@ -1188,6 +1234,7 @@ begin
     writeln('');
 end;
 
+//Dumps table creation commands, then foreign keys and check constraints (if needed)
 procedure DumpTables(conn: _Connection);
 var rs: _Recordset;
   TableName: WideString;
@@ -1219,13 +1266,26 @@ begin
   end;
 
  //One more time, with foreign keys
-  if rs.BOF then exit;
-  rs.MoveFirst();
-  while not rs.EOF do begin
-    TableName := str(rs.Fields['TABLE_NAME'].Value);
-    DumpForeignKeys(conn, TableName);
-    rs.MoveNext();
+  if NeedDumpRelations and not rs.BOF then begin
+    rs.MoveFirst();
+    while not rs.EOF do begin
+      TableName := str(rs.Fields['TABLE_NAME'].Value);
+      DumpForeignKeys(conn, TableName);
+      rs.MoveNext();
+    end;
   end;
+
+ //One more time, with check constraints
+ (* Not implemented yet
+  if NeedDumpCheckConstraints and not rs.BOF then begin
+    rs.MoveFirst();
+    while not rs.EOF do begin
+      TableName := str(rs.Fields['TABLE_NAME'].Value);
+      DumpCheckConstraints(conn, TableName);
+      rs.MoveNext();
+    end;
+  end;
+ *)
 end;
 
 procedure DumpViews(conn: _Connection);
@@ -1286,7 +1346,7 @@ begin
  //Procedures
   if NeedDumpProcedures then begin
     writeln('/* Procedures */');
-   // DumpProcedures(conn); //not writen yet
+   // DumpProcedures(conn); //not implemented yet
   end;
 
   writeln('/* Access SQL export data end. */');
@@ -1294,6 +1354,13 @@ end;
 
 ////////////////////////////////////////////////////////////////////////////////
 ///  ExecSql --- Executes SQL from Input
+
+//Outputs a warning which should only be visible if we're not in silent mode.
+procedure Complain(msg: WideString);
+begin
+  if LoggingMode<>lmSilent then
+    err(msg);
+end;
 
 //„итает следующую команду из входного потока, соедин€€ при необходимости подр€д идущие строки.
 //—охран€ет остаток строки. ”читывает настройку CrlfBreak.
@@ -1392,12 +1459,6 @@ begin
     Result := cmd <> '';
 end;
 
-procedure Complain(msg: WideString);
-begin
-  if LoggingMode<>lmSilent then
-    writeln(msg);
-end;
-
 procedure daoSetOrAdd(Dao: Database; Props: DAO_TLB.Properties; Name, Value: WideString);
 var Prop: DAO_TLB.Property_;
 begin
@@ -1434,7 +1495,7 @@ begin
   dao := EstablishDaoConnection;
   dao.TableDefs.Refresh;
   td := dao.TableDefs[TableName];
-  daoSetOrAdd(dao, td.Fields[FieldName].Properties, 'Description', 'Comment');
+  daoSetOrAdd(dao, td.Fields[FieldName].Properties, 'Description', Comment);
 end;
 
 procedure PrintRecordset(rs: _Recordset);
@@ -1481,22 +1542,22 @@ begin
     on E: EOleException do
     if not Weak then begin
       if LoggingMode<>lmSilent then begin
-        writeln('');
-        writeln('Error while executing: ');
-        writeln(tr_cmd);
+        err('');
+        err('Error while executing: ');
+        err(tr_cmd);
       end;
 
       if (Errors=emIgnore) and (LoggingMode<>lmSilent) then
-        writeln(E.Classname + ': ' + E.Message + '(0x' + IntToHex(E.ErrorCode, 8) + ')');
+        err(E.Classname + ': ' + WinToOem(E.Message) + '(0x' + IntToHex(E.ErrorCode, 8) + ')');
       if Errors<>emIgnore then
         raise; //Re-raise it to be caught in Main()
       exit; //else just exit
     end;
     on E: Exception do begin //Unrecognized exception, preferences are ignored - STOP.
-      writeln('');
-      writeln('Error while executing: ');
-      writeln(tr_cmd);
-      writeln(E.Classname + ': ' + E.Message);
+      err('');
+      err('Error while executing: ');
+      err(tr_cmd);
+      err(E.Classname + ': ' + E.Message);
       raise;
     end;
   end;
@@ -1608,17 +1669,17 @@ begin
   except
     on E:EUsage do begin
       if E.Message <> '' then
-        writeln(E.Message);
+        err(E.Message);
       PrintShortUsage;
-      ExitCode := -2;
+      ExitCode := 2;
     end;
     on E:EOleException do begin
-      writeln(E.Classname + ': ' + E.Message + '(0x' + IntToHex(E.ErrorCode, 8) + ')');
-      ExitCode := -3;
+      err(E.Classname + ': ' + WinToOem(E.Message) + '(0x' + IntToHex(E.ErrorCode, 8) + ')');
+      ExitCode := 3;
     end;
     on E:Exception do begin
-      Writeln(E.Classname, ': ', E.Message);
-      ExitCode := -1;
+      err(E.Classname+': '+E.Message);
+      ExitCode := 1;
     end;
   end;
 end.
