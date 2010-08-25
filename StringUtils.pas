@@ -9,7 +9,7 @@ uses SysUtils, WideStrUtils;
 
 type
   TMarkerFlag = (
-    mfKeepOp,   //do not consider op/ed to be part of the contents.
+    mfKeepOp,   //do not consider op/ed to be part of the contents
     mfKeepEd,   //for example, keep them when deleting comments
     mfNesting   //allow nesting
   );
