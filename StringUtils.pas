@@ -11,9 +11,16 @@ type
   TMarkerFlag = (
     mfKeepOp,   //do not consider op/ed to be part of the contents
     mfKeepEd,   //for example, keep them when deleting comments
-    mfNesting   //allow nesting
+    mfNesting,  //allow nesting
+    mfEscaping  //ignore escaped EDs. Requires no nesting. 
   );
   TMarkerFlags = set of TMarkerFlag;
+
+ //Note on nesting:
+ //Blocks can either allow nesting, in which case subblocks of any type can exist,
+ //or be "comment-like", so that all the contents is treated as a data.
+ //In nesting blocks, escaping is not allowed.
+
   TMarker = record
     s: Widestring;
     e: Widestring;
@@ -39,6 +46,9 @@ var
  //Match()
   NoEndCommandMarkers: TMarkers;
 
+ //Pseudo marker (#13, #10) - used in CRLF deletion
+  EndLineMarker: TMarker;
+
 
 function charPos(start, ptr: PWideChar): integer;
 function prevChar(ptr: PWideChar): PWideChar;
@@ -52,8 +62,9 @@ function MetaPresent(s, meta: WideString): boolean;
 
 function WStrPosIn(ps, pe, pattern: PWideChar): PWideChar;
 function WStrMatch(main, sub: PWideChar): boolean;
+function WStrPosEnd(pc: PWideChar; m: TMarkers; mk: TMarker): PWideChar;
 
-function RemoveParts(s: WideString; op, ed: WideString; Flags: TMarkerFlags): string;
+function RemoveParts(s: WideString; mk: TMarker; IgnoreBlocks: TMarkers): string;
 function RemoveCommentsI(s: WideString; m: TMarkers): WideString;
 function RemoveComments(s: WideString): WideString;
 
@@ -202,20 +213,50 @@ begin
   Result := (sub^=#00);
 end;
 
-//Receives a pointer to a start of the block. Looks for an ending marker, minding nesting.
-function WStrPosEnd(pc: PWideChar; op, ed: WideString; Nesting: boolean): PWideChar;
-var lvl: integer;
+//Receives a pointer to a start of the block of type Ind.
+//Looks for an ending marker, minding nesting. Returns a pointer to the start of ED.
+function WStrPosEnd(pc: PWideChar; m: TMarkers; mk: TMarker): PWideChar;
+var i: integer;
+  SpecSymbol: boolean;
 begin
-  lvl := 0;
-  while pc^<>#00 do begin
-    if Nesting and WStrMatch(pc, PWideChar(op)) then
-      Inc(lvl);
-    if WStrMatch(pc, PWideChar(ed)) then begin
-      Dec(lvl);
-      if lvl<0 then begin
-        Result := pc;
-        exit;
+ //To find the block ED, we need to scan till the end markers:
+ // I. For simple comments: minding specsymbols.
+ // II. For nested comments:
+ //   - scan till the ED marker or the OP marker for any comment
+ //    - if it's the OP, recursively call the search to get it's ED, restart from there
+  SpecSymbol := false;
+  while pc^ <> #00 do begin
+
+    if mfNesting in mk.f then
+     //Look for any OP
+      for i := 0 to Length(m) - 1 do
+        if WStrMatch(pc, PWideChar(mk.s)) then begin
+         //Find it's ED
+          pc := WStrPosEnd(pc, m, m[i]);
+          if pc=nil then begin
+            Result := nil;
+            exit;
+          end;
+         //Skip ED (should be available! it was matched)
+          Inc(pc, Length(m[i].e));
+          break;
+        end;
+
+    if mfEscaping in mk.f then
+      if SpecSymbol then begin
+        SpecSymbol := false;
+        Inc(pc);
+        continue;
+      end else
+      if pc^='\' then begin
+        SpecSymbol := true;
+        Inc(pc);
+        continue;
       end;
+
+    if WStrMatch(pc, PWideChar(mk.e)) then begin
+      Result := pc;
+      exit;
     end;
 
     Inc(pc);
@@ -224,9 +265,12 @@ begin
 end;
 
 
-//Removes all the parts of the text between Op-Ed blocks, including Op blocks and, if instructed, Ed blocks.
-function RemoveParts(s: WideString; op, ed: WideString; Flags: TMarkerFlags): string;
+//Removes all the parts of the text between Op-Ed markers, except those in IgnoreBlocks.
+//Usually you want to pass all the non-nesting block types in IgnoreBlocks.
+//Flags govern if the OP/ED markers themselves will be stripped or preserved.
+function RemoveParts(s: WideString; mk: TMarker; IgnoreBlocks: TMarkers): string;
 var ps, pc, pe: PWideChar;
+  ctype: integer;
 
   procedure appendResult(pc, pe: PWideChar);
   begin
@@ -258,24 +302,39 @@ begin
   Result := '';
 
   ps := @s[1];
-  pc := WStrPos(ps, PWideChar(op));
+  ctype := WStrPosOrCommentI(ps, PWideChar(mk.s), IgnoreBlocks, pc);
   while pc <> nil do begin
-    pe := WStrPosEnd(pc, op, ed, mfNesting in Flags);
-    if pe=nil then begin
-      appendResult(ps, WStrEnd(ps));
-      exit;
+    if ctype>=0 then begin
+     //It's an IgnoreBlock    
+      pe := WStrPosEnd(pc, IgnoreBlocks, IgnoreBlocks[ctype]);
+      if pe=nil then begin
+        appendResult(ps, WStrEnd(ps));
+        exit;
+      end;
+
+     //Next part      
+      Inc(pe, Length(IgnoreBlocks[ctype].e)); //Disregard Flags.mfKeepEd because we copy the contents anyway
+      appendResult(ps, pe);
+      ps := pe;
+    end else begin
+     //It's a DeleteBlock
+      pe := WStrPosEnd(pc, IgnoreBlocks, mk);
+      if pe=nil then begin
+        appendResult(ps, WStrEnd(ps));
+        exit;
+      end;
+
+     //Save the text till Pc and skip [pc, pe]
+      if mfKeepOp in mk.f then
+        Inc(pc, Length(mk.s));
+      appendResult(ps, pc);
+
+     //Next part
+      ps := pe;
+      if not (mfKeepEd in mk.f) then
+        Inc(ps, Length(mk.e));
     end;
-
-   //Else we save the text till Pc and skip [pc, pe]
-    if mfKeepOp in flags then
-      Inc(pc, Length(op));
-    appendResult(ps, pc);
-
-   //Next part
-    ps := pe;
-    if not (mfKeepEd in flags) then
-      Inc(ps, Length(ed));
-    pc := WStrPos(ps, PWideChar(op));
+    ctype := WStrPosOrCommentI(ps, PWideChar(mk.s), IgnoreBlocks, pc);
   end;
 
  //If there's still text till the end, add it
@@ -288,8 +347,8 @@ function RemoveCommentsI(s: WideString; m: TMarkers): WideString;
 var i: integer;
 begin
   for i := 0 to Length(m)-1 do
-    s := RemoveParts(s, m[i].s, m[i].e, m[i].f);
-  Result := RemoveParts(s, #13, #10, []);
+    s := RemoveParts(s, m[i], m);
+  Result := RemoveParts(s, EndLineMarker, m);
 end;
 
 function RemoveComments(s: WideString): WideString;
@@ -347,7 +406,7 @@ end;
 function WStrPosCommentCloserI(pc: PWideChar; cType: integer; m: TMarkers): PWideChar;
 begin
   if (cType >= 0) and (cType <= Length(m)-1) then begin
-    Result := WStrPosEnd(pc, m[cType].s, m[cType].e, mfNesting in m[cType].f);
+    Result := WStrPosEnd(pc, m, m[cType]);
     if (Result<>nil) and not (mfKeepEd in m[cType].f) then Inc(Result, Length(m[cType].e));
   end else
     Result := nil;
@@ -593,13 +652,16 @@ end;
 
 initialization
   SetLength(CommentMarkers, 3);
-  CommentMarkers[0] := Marker('{', '}');
-  CommentMarkers[1] := Marker('/*', '*/');
+  CommentMarkers[0] := Marker('{', '}' , [mfEscaping]);
+  CommentMarkers[1] := Marker('/*', '*/', [mfEscaping]);
   CommentMarkers[2] := Marker('--', #13#10, [mfKeepEd]);
 
   NoEndCommandMarkers := Copy(CommentMarkers);
-  SetLength(NoEndCommandMarkers, 6);
+  SetLength(NoEndCommandMarkers, 7);
   NoEndCommandMarkers[3] := Marker('[', ']');
   NoEndCommandMarkers[4] := Marker('(', ')', [mfNesting]);
-  NoEndCommandMarkers[5] := Marker('''', '''');
+  NoEndCommandMarkers[5] := Marker('''', '''', [mfEscaping]);
+  NoEndCommandMarkers[6] := Marker('"', '"', [mfEscaping]);
+
+  EndLineMarker := Marker(#13, #10);
 end.

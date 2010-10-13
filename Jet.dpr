@@ -424,6 +424,13 @@ begin
   else Result := integer(val);
 end;
 
+function uint(val: OleVariant): int64;
+begin
+  if VarIsNil(val) then
+    Result := 0
+  else Result := val;
+end;
+
 function bool(val: OleVariant): boolean;
 begin
   if VarIsNil(val) then
@@ -647,6 +654,230 @@ begin
     err('Warning: '+msg);
 end;
 
+{$REGION 'Encoding'}
+var
+  FJetFormatSettings: TFormatSettings;
+  FJetFormatSettingsInitialized: boolean = false;
+
+function JetFormatSettings: TFormatSettings;
+begin
+  if not FJetFormatSettingsInitialized then begin
+    GetLocaleFormatSettings(GetThreadLocale, FJetFormatSettings);
+    with FJetFormatSettings do begin
+      DecimalSeparator := '.';
+      DateSeparator := '-';
+      TimeSeparator := ':';
+      ShortDateFormat := 'mm-dd-yyyy hh:nn:ss';
+      LongDateFormat := 'mm-dd-yyyy hh:nn:ss';
+    end;
+    FJetFormatSettingsInitialized := true;
+  end;
+  Result := FJetFormatSettings;
+end;
+
+//Кодирует бинарные данные для вставки в SQL-текст.
+//Сейчас нигде не используется (дефолтные значения уже эскейпнуты базой)
+function EncodeBin(data: array of byte): WideString;
+const HexChars:WideString='0123456789ABCDEF';
+var i: integer;
+begin
+  if Length(data)<=0 then begin
+    Result := 'NULL';
+    exit;
+  end;
+
+  Result := '0x';
+  SetLength(Result, 2+Length(data)*2);
+  for i := 0 to Length(data) - 1 do begin
+    Result[2+i*2+0] := HexChars[1+(data[i] shr 4)];
+    Result[2+i*2+1] := HexChars[1+(data[i] and $0F)];
+  end;
+end;
+
+function EncodeOleBin(data: OleVariant): WideString;
+var bin_data: array of byte;
+begin
+  if VarIsNil(data) then
+    Result := NULL
+  else begin
+    bin_data := data;
+    Result := EncodeBin(bin_data);
+  end;
+end;
+
+//Кодирует /**/ коммент для вставки в SQL-текст. Эскейпит символы закрытия коммента.
+//Замены:
+//  \ == \\
+//  / == \/
+//Удобно, что не требуется специальный парсинг при поиске конца коммента:
+//опасные комбинации после энкодинга просто пропадают.
+function EncodeComment(str: WideString): WideString;
+var pc: PWideChar;
+  i: integer;
+  c: WideChar;
+begin
+ //We'll never need more than twice the size
+  SetLength(Result, 2*Length(str));
+  pc := @Result[1];
+
+  for i := 1 to Length(str) do begin
+    c := str[i];
+    if (c='\') or (c='/') then begin
+      pc^ := '\';
+      Inc(pc);
+      pc^ := c;
+    end else
+    begin
+      pc^ := c;
+    end;
+    Inc(pc);
+  end;
+
+ //Actual length
+  SetLength(Result, (integer(pc)-integer(@Result[1])) div 2);
+end;
+
+//Раскодирует коммент.
+function DecodeComment(str: WideString): WideString;
+var pc: PWideChar;
+  i: integer;
+  c: WideChar;
+  SpecSymbol: boolean;
+begin
+ //We'll never need more than the source size
+  SetLength(Result, Length(str));
+  pc := @Result[1];
+
+  SpecSymbol := false;
+  for i := 1 to Length(str) do begin
+    c := str[i];
+    if (not SpecSymbol) and (c='\') then begin
+      SpecSymbol := true;
+      continue;
+    end;
+    SpecSymbol := false;
+    pc^ := c;
+    Inc(pc);
+  end;
+
+ //Actual length
+  SetLength(Result, (integer(pc)-integer(@Result[1])) div 2);
+end;
+
+//Кодирует строку для вставки в SQL-текст, заменяет спецсимволы.
+//Сейчас нигде не используется (дефолтные значения уже эскейпнуты базой)
+function EncodeStr(val: WideString): WideString;
+var pc: PWideChar;
+  i: integer;
+  c: WideChar;
+begin
+ //We'll never need more than twice the size
+  SetLength(Result, 2*Length(val));
+  pc := @Result[1];
+
+  for i := 1 to Length(val) do begin
+    c := val[i];
+    if c=#00 then begin  //nul
+      pc^ := '\';
+      Inc(pc);
+      pc^ := '0';
+    end else
+    if c=#08 then begin  //backspace
+      pc^ := '\';
+      Inc(pc);
+      pc^ := 'b';
+    end else
+    if c=#09 then begin  //tab
+      pc^ := '\';
+      Inc(pc);
+      pc^ := 't';
+    end else
+    if (c='''') or (c='"') or (c='\') then begin
+      pc^ := '\';
+      Inc(pc);
+      pc^ := c;
+    end else
+    begin
+      pc^ := c;
+    end;
+    Inc(pc);
+  end;
+
+ //Actual length
+  SetLength(Result, (integer(pc)-integer(@Result[1])) div 2);
+end;
+
+//Because Delphi does not allow int64(Value).
+function uint_cast(Value: OleVariant): int64;
+begin
+  Result := value;
+end;
+
+//Formats a field value according to it's type
+//Сейчас нигде не используется (дефолтные значения уже эскейпнуты базой)
+function JetEncodeTypedValue(Value: OleVariant; DataType: integer): Widestring;
+begin
+  if VarIsNil(Value) then
+    Result := 'NULL'
+  else
+  case DataType of
+    DBTYPE_I1, DBTYPE_I2, DBTYPE_I4,
+    DBTYPE_UI1, DBTYPE_UI2, DBTYPE_UI4:
+      Result := IntToStr(integer(Value));
+    DBTYPE_I8, DBTYPE_UI8:
+      Result := IntToStr(uint_cast(Value));
+    DBTYPE_R4, DBTYPE_R8:
+      Result := FloatToStr(double(Value), JetFormatSettings);
+    DBTYPE_NUMERIC, DBTYPE_DECIMAL, DBTYPE_CY:
+      Result := FloatToStr(currency(Value), JetFormatSettings);
+    DBTYPE_GUID:
+     //Or else it's not GUID
+      Result := GuidToString(StringToGuid(Value));
+    DBTYPE_DATE:
+      Result := '#'+DatetimeToStr(Value, JetFormatSettings)+'#';
+    DBTYPE_BOOL:
+      Result := BoolToStr(Value, {UseBoolStrs=}true);
+    DBTYPE_BYTES:
+      Result := EncodeOleBin(Value);
+    DBTYPE_WSTR:
+      Result := ''''+EncodeStr(Value)+'''';
+  else
+    Result := ''''+EncodeStr(Value)+''''; //best guess
+  end;
+end;
+
+//Encodes a value according to it's variant type
+//Сейчас нигде не используется (дефолтные значения уже эскейпнуты базой)
+function JetEncodeValue(Value: OleVariant): WideString;
+begin
+  if VarIsNil(Value) then
+    Result := 'NULL'
+  else
+  case VarType(Value) of
+    varSmallInt, varInteger, varShortInt,
+    varByte, varWord, varLongWord:
+      Result := IntToStr(integer(Value));
+    varInt64:
+      Result := IntToStr(uint_cast(Value));
+    varSingle, varDouble:
+      Result := FloatToStr(double(Value), JetFormatSettings);
+    varCurrency:
+      Result := FloatToStr(currency(Value), JetFormatSettings);
+    varDate:
+      Result := '#'+DatetimeToStr(Value, JetFormatSettings)+'#';
+    varOleStr, varString:
+      Result := ''''+EncodeStr(Value)+'''';
+    varBoolean:
+      Result := BoolToStr(Value, {UseBoolStrs=}true);
+    varArray:
+      Result := EncodeOleBin(Value);
+  else
+    Result := ''''+EncodeStr(Value)+''''; //best guess
+  end;
+end;
+{$ENDREGION}
+
+{$REGION 'Columns'}
 type
   TColumnDesc = record
     Name: WideString;
@@ -699,6 +930,7 @@ begin
     end;
   end;
 end;
+{$ENDREGION}
 
 function GetTableText(conn: _Connection; Table: WideString): WideString;
 var rs: _Recordset;
@@ -822,15 +1054,20 @@ begin
     if not bool(Column.IsNullable) then
       s := s + ' NOT NULL';
     if bool(Column.HasDefault) then
-      s := s + ' DEFAULT '+str(Column.Default);
+      if VarIsNil(Column.Default) then
+        s := s + ' DEFAULT NULL'
+      else
+       //Default values do not need to be encoded, they're stored in an encoded way.
+       //String values are properly escaped and quoted, Function() ones aren't, it's all fine.
+        s := s + ' DEFAULT ' + str(Column.Default);
 
    //Access does not support comments, therefore we just output them in our propietary format.
    //If you use this importer, it'll understand them.
     if HandleComments and (Column.Description <> '') then
       if PrivateExtensions then
-        s := s + ' /**COMMENT* '+Column.Description+' */'
+        s := s + ' /**COMMENT* '+EncodeComment(Column.Description)+' */'
       else
-        s := s + ' /* '+Column.Description+' */';
+        s := s + ' /* '+EncodeComment(Column.Description)+' */';
 
     if Result <> '' then
       Result := Result + ','#13#10+s
@@ -839,7 +1076,7 @@ begin
   end;
 end;
 
-
+{$REGION 'Indexes'}
 type
   TIndexColumnDesc = record
     Name: WideString;
@@ -937,7 +1174,9 @@ begin
   Result._Initialized := false;
   Result._Declared := false;
 end;
+{$ENDREGION}
 
+{$REGION 'Constraints'}
 type
   TConstraintDesc = record
     Name: WideString;
@@ -975,6 +1214,7 @@ begin
   SetLength(data, Length(data)+1);
   data[Length(data)-1].Name := ConstraintName;
 end;
+{$ENDREGION}
 
 //Returns CONSTRAINT list for a given table.
 function GetTableIndexes(conn: _Connection; Table: WideString): TIndexes;
@@ -1084,6 +1324,7 @@ begin
   end;
 end;
 
+{$REGION 'ForeignKeys'}
 type
   TForeignColumn = record
     PrimaryKey: WideString;
@@ -1160,6 +1401,7 @@ begin
   Result.Name := ForeignKeyName;
   Result._Initialized := false;
 end;
+{$ENDREGION}
 
 //Dumps foreign key creation commands for a given table
 procedure DumpForeignKeys(conn: _Connection; TableName: WideString);
@@ -1255,9 +1497,9 @@ begin
     writeln(GetTableText(conn, TableName));
     if HandleComments and (Description<>'') then
       if PrivateExtensions then
-        writeln(') /**COMMENT* '+Description+'*/;')
+        writeln(') /**COMMENT* '+EncodeComment(Description)+'*/;')
       else
-        writeln(') /* '+Description+' */')
+        writeln(') /* '+EncodeComment(Description)+' */')
     else
       writeln(');');
     DumpIndexes(conn, TableName);
@@ -1314,9 +1556,9 @@ begin
     if HandleComments and (Description <> '') then begin
       writeln(Definition);
       if PrivateExtensions then
-        writeln('/**COMMENT* '+Description+' */;')
+        writeln('/**COMMENT* '+EncodeComment(Description)+' */;')
       else
-        writeln('/* '+Description+' */;')
+        writeln('/* '+EncodeComment(Description)+' */;')
     end else
       writeln(Definition+';');
     writeln('');
@@ -1568,7 +1810,7 @@ begin
     if (Length(Data)=5) and (Trim(Data[1])='' {between CREATE and TABLE}) then begin
       TableName := CutIdBrackets(RemoveComments(Data[2]));
       if GetMeta(Data[4], 'COMMENT', strComment) then
-        jetSetTableComment(TableName, strComment);
+        jetSetTableComment(TableName, DecodeComment(strComment));
 
      //Field comments
       Fields := Split(Data[3], ',');
@@ -1579,7 +1821,7 @@ begin
             Complain('Cannot decode field name for field definition "'+Fields[i]+'". '
               +'Comment will not be added to the database.')
           else
-            jetSetFieldComment(TableName, FieldName, strComment);
+            jetSetFieldComment(TableName, FieldName, DecodeComment(strComment));
         end;
     end;
 
@@ -1587,7 +1829,7 @@ begin
     if (Length(Data)=5) and (Trim(Data[1])='' {between CREATE and VIEW}) then begin
       TableName := CutIdBrackets(RemoveComments(Data[2]));
       if GetMeta(Data[3], 'COMMENT', strComment) then
-        jetSetTableComment(TableName, strComment);
+        jetSetTableComment(TableName, DecodeComment(strComment));
     end;
   end; //of PrivateExtensions
  
