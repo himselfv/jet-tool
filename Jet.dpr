@@ -944,7 +944,7 @@ var rs: _Recordset;
   pre, scal: OleVariant;
   AdoxTable: ADOX_TLB.Table;
   DaoTable: DAO_TLB.TableDef;
-  NoDefault: boolean; //don't print DEFAULT=whatever
+  NoDefault: boolean; //don't print "DEFAULT=value" for this field
 begin
  //Doing this through DAO is slightly faster (OH GOD HOW MUCH DOES ADOX SUCK),
  //but DAO can only be used with -f, so effectively we just strip out all
@@ -1067,7 +1067,7 @@ begin
     s := '['+Column.Name + '] ' + dts;
     if not bool(Column.IsNullable) then
       s := s + ' NOT NULL';
-    if bool(Column.HasDefault) then
+    if (not NoDefault) and bool(Column.HasDefault) then
       if VarIsNil(Column.Default) then
         s := s + ' DEFAULT NULL'
       else
