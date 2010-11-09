@@ -55,10 +55,13 @@ uses
       ADD CONSTRAINT which are not CHECK CONSTRAINT.
   All of these compose "Table constraints".
 
-  OpenSchema documentation:
+  Documentation:
+    http://msdn.microsoft.com/en-us/library/ms714540(VS.85).aspx  :: Access data types
+    http://msdn.microsoft.com/en-us/library/bb267262(office.12).aspx :: Access 2007 DDL
+
+  Schema documentation:
     http://msdn.microsoft.com/en-us/library/ms675274(VS.85).aspx  :: Schema identifiers
     http://msdn.microsoft.com/en-us/library/ee265709(BTS.10).aspx  :: Some of the schemas, documented
-    http://msdn.microsoft.com/en-us/library/ms714540(VS.85).aspx  :: Access data types 
 *)
 
 {$UNDEF DEBUG}
@@ -941,6 +944,7 @@ var rs: _Recordset;
   pre, scal: OleVariant;
   AdoxTable: ADOX_TLB.Table;
   DaoTable: DAO_TLB.TableDef;
+  NoDefault: boolean; //don't print DEFAULT=whatever
 begin
  //Doing this through DAO is slightly faster (OH GOD HOW MUCH DOES ADOX SUCK),
  //but DAO can only be used with -f, so effectively we just strip out all
@@ -989,6 +993,7 @@ begin
  //Building string
   Result := '';
   for Column in Columns.data do begin
+    NoDefault := false;
    //Data type
     if Column.AutoIncrement then
       dts := 'COUNTER' //special access data type, also known as AUTOINCREMENT
@@ -1005,7 +1010,16 @@ begin
       DBTYPE_CY: dts := 'MONEY';
       DBTYPE_R4: dts := 'REAL';
       DBTYPE_R8: dts := 'FLOAT';
-      DBTYPE_GUID: dts := 'UNIQUEIDENTIFIER';
+      DBTYPE_GUID: begin
+       //A special case: GUID counters are stored as UIDS with DEFAULT=GenGUID().
+       //They have to be declared as COUNTER UNIQUEIDENTIFIER though, else they
+       //work but look ugly in Access.
+        if Column.HasDefault and SameText(str(Column.Default), 'GenGuid()') then begin
+          dts := 'COUNTER UNIQUEIDENTIFIER';
+          NoDefault := true; //cancel DEFAULT=GenGuid()
+        end else
+          dts := 'UNIQUEIDENTIFIER';
+      end;
       DBTYPE_DATE: dts := 'DATETIME';
       DBTYPE_NUMERIC,
       DBTYPE_DECIMAL: begin
