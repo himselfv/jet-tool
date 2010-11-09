@@ -338,10 +338,10 @@ begin
     continue;
   end;
 
- //Если спросили help, ничего не проверяем
+ //If asked for help, there's nothing to check
   if WideSameText(Command, 'help') then exit;
 
- //Проверяем параметры. Допустимо только одно: ConnectionString, ConnectionName, Filename
+ //Check params, only one is allowed: ConnectionString, ConnectionName, Filename
   i := 0;
   if ConnectionString<>'' then Inc(i);
   if DataSourceName<>'' then Inc(i);
@@ -349,16 +349,16 @@ begin
   if i > 1 then BadUsage('Only one source (ConnectionString/DataSourceName/Filename) can be specified.');
   if i < 1 then BadUsage('A source (ConnectionString/DataSourceName/Filename) needs to be specified.');
 
- //Если подключение - ConnectionString, дополнительные параметры не допускаются: всё включено
+ //With ConnectionString, additional params are disallowed: everything is in.
   if (ConnectionString<>'') and (DatabasePassword<>'') then
     BadUsage('ConnectionString conflicts with DatabasePassword: this should be included inside of the connection string.');
 
- //Если требуется создать базу, допустимо только подключение по имени файла
+ //If requested to create a db, allow only filename connection.
   if NewDb and (Filename='') then
     BadUsage('Database creation is supported only when connecting by Filename.');
   if NewDb and (WideSameText(Command, 'dump') or WideSameText(Command, 'schema'))
   and (LoggingMode=lmVerbose) then begin
-    err('NOTE: You asked to create database and then dump its contents.');
+    err('NOTE: You asked to create a database and then dump its contents.');
     err('What the hell are you trying to do?');
   end;
   if ForceNewDb and not NewDb then
@@ -367,10 +367,10 @@ begin
   if NewDb and not ForceNewDb and FileExists(Filename) then
     raise Exception.Create('File '+Filename+' already exists. Cannot create a new one.');
 
- //Можем ли использовать DAO. Иначе предпочитаем другие варианты.
+ //Whether we can use DAO. If not, prefer other options.
   CanUseDao := (Filename<>'');
 
- //Чтобы парсить комменты, требуется DAO, т.е. подключение по имени файла
+ //To parse comments we need DAO, i.e. filename connection
   if WideSameText(Command, 'exec') and HandleComments then begin
     if not PrivateExtensions then
       BadUsage('You need --private-extensions to handle --comments when doing "exec".');
@@ -378,7 +378,7 @@ begin
       BadUsage('You cannot use ConnectionString source with --comments when doing "exec"');
   end;
 
- //Преобразуем все виды источников к ConnectionString
+ //Convert all sources to ConnectionStrings
   if Filename<>'' then
     ConnectionString := 'Provider=Microsoft.Jet.OLEDB.4.0;Data Source="'+Filename+'";'
   else
@@ -388,8 +388,8 @@ begin
   if DatabasePassword<>'' then
     ConnectionString := ConnectionString + 'Jet OLEDB:Database Password="'+DatabasePassword+'";';
 
- //Ресольвим дефолтные значения в зависимости от типа входного потока.
- //Если тип не удаётся угадать, по умолчанию подразумеваем файл (всегда можно указать опции!)
+ //Resolve default values depending on a type of input stream.
+ //If we fail to guess the type, default to File (this can always be overriden directly!)
   KeyboardInput := IsConsoleHandle(STD_INPUT_HANDLE) and (stdi='');
   if Errors=emDefault then
     if KeyboardInput then
@@ -508,6 +508,17 @@ var
   DaoEngine: DbEngine;
   DaoConnection: Database;
 
+procedure NeededDaoError;
+begin
+  raise Exception.Create('The operation you''re performing apparently requires '
+    +'DAO. DAO and DAO-dependent functions can only be accessed through Filename '
+    +'source. That you see this error must mean that somehow this condition was not '
+    +'properly verified during command-line parsing. '#13
+    +'Please file a bug to the developers. For the time being, try to guess which '
+    +'setting required DAO (usually something obscure like importing comments) '
+    +'and either disable that or switch to connecting through Filename.');
+end;
+
 //Returns a DAO connection. Caching is implemented.
 function GetDaoConnection: Database;
 var Params: OleVariant;
@@ -532,13 +543,7 @@ begin
     Params := 'ODBC;DSN='+DataSourceName+';UID='+User+';PWD='+Password+';';
     Result := DaoEngine.OpenDatabase('', False, False, Params);
   end else
-    raise Exception.Create('The operation you''re performing apparently requires '
-      +'DAO. DAO and DAO-dependent functions can only be accessed through Filename '
-      +'source. That you see this error must mean somehow this condition was not '
-      +'properly checked during command-line parsing. '#13
-      +'Please file a bug to developers. As for yourself, try to guess which '
-      +'setting required DAO (usually something obscure like importing comments) '
-      +'and either disable that or switch to connecting through Filename.');
+    NeededDaoError();
 end;
 
 //Establishes a NEW DAO connection. Also refreshes the engine cache.
@@ -562,13 +567,7 @@ begin
     Params := 'ODBC;DSN='+DataSourceName+';UID='+User+';PWD='+Password+';';
     Result := DbEngine.OpenDatabase('', False, False, Params);
   end else
-    raise Exception.Create('The operation you''re performing apparently requires '
-      +'DAO. DAO and DAO-dependent functions can only be accessed through Filename '
-      +'source. That you see this error must mean somehow this condition was not '
-      +'properly checked during command-line parsing. '#13
-      +'Please file a bug to developers. As for yourself, try to guess which '
-      +'setting required DAO (usually something obscure like importing comments) '
-      +'and either disable that or switch to connecting through Filename.');
+    NeededDaoError();
 end;
 
 //This is needed before you CoUninitialize Ole. More notes where this is called.
@@ -646,7 +645,7 @@ end;
 /// DumpSql --- Dumps database contents
 
 (*
- Writes a warning to a generated file. If we're not in silent mode, outputs it as a error too.
+ Writes a warning to a generated file. If we're not in silent mode, outputs it as an error too.
  This should be used in cases where the warning is really important (something cannot be done,
  some information ommited). If you just want to give a hint, use "err(msg)";
 *)
@@ -678,8 +677,8 @@ begin
   Result := FJetFormatSettings;
 end;
 
-//Кодирует бинарные данные для вставки в SQL-текст.
-//Сейчас нигде не используется (дефолтные значения уже эскейпнуты базой)
+//Encodes binary data for inserting to SQL text.
+//Presently unused (DEFAULT values are already escaped in the DB)
 function EncodeBin(data: array of byte): WideString;
 const HexChars:WideString='0123456789ABCDEF';
 var i: integer;
@@ -708,12 +707,12 @@ begin
   end;
 end;
 
-//Кодирует /**/ коммент для вставки в SQL-текст. Эскейпит символы закрытия коммента.
-//Замены:
+//Encodes /**/ comment for inserting into SQL text. Escapes closure symbols.
+//Replacements:
 //  \ == \\
 //  / == \/
-//Удобно, что не требуется специальный парсинг при поиске конца коммента:
-//опасные комбинации после энкодинга просто пропадают.
+//It's handy that you don't need a special parsing when looking for comment's end:
+//dangerous combinations just get broken during the encoding.
 function EncodeComment(str: WideString): WideString;
 var pc: PWideChar;
   i: integer;
@@ -740,7 +739,7 @@ begin
   SetLength(Result, (integer(pc)-integer(@Result[1])) div 2);
 end;
 
-//Раскодирует коммент.
+//Decodes comment.
 function DecodeComment(str: WideString): WideString;
 var pc: PWideChar;
   i: integer;
@@ -767,8 +766,8 @@ begin
   SetLength(Result, (integer(pc)-integer(@Result[1])) div 2);
 end;
 
-//Кодирует строку для вставки в SQL-текст, заменяет спецсимволы.
-//Сейчас нигде не используется (дефолтные значения уже эскейпнуты базой)
+//Encodes a string for inserting into SQL text, replaces specsymbols.
+//Presently unused (DEFAULT values are already escaped in the DB)
 function EncodeStr(val: WideString): WideString;
 var pc: PWideChar;
   i: integer;
@@ -817,7 +816,7 @@ begin
 end;
 
 //Formats a field value according to it's type
-//Сейчас нигде не используется (дефолтные значения уже эскейпнуты базой)
+//Presently unused (DEFAULT values are already escaped in the DB)
 function JetEncodeTypedValue(Value: OleVariant; DataType: integer): Widestring;
 begin
   if VarIsNil(Value) then
@@ -850,7 +849,7 @@ begin
 end;
 
 //Encodes a value according to it's variant type
-//Сейчас нигде не используется (дефолтные значения уже эскейпнуты базой)
+//Presently unused (DEFAULT values are already escaped in the DB)
 function JetEncodeValue(Value: OleVariant): WideString;
 begin
   if VarIsNil(Value) then
@@ -944,7 +943,6 @@ var rs: _Recordset;
   pre, scal: OleVariant;
   AdoxTable: ADOX_TLB.Table;
   DaoTable: DAO_TLB.TableDef;
-  NoDefault: boolean; //don't print "DEFAULT=value" for this field
 begin
  //Doing this through DAO is slightly faster (OH GOD HOW MUCH DOES ADOX SUCK),
  //but DAO can only be used with -f, so effectively we just strip out all
@@ -993,7 +991,6 @@ begin
  //Building string
   Result := '';
   for Column in Columns.data do begin
-    NoDefault := false;
    //Data type
     if Column.AutoIncrement then
       dts := 'COUNTER' //special access data type, also known as AUTOINCREMENT
@@ -1010,16 +1007,7 @@ begin
       DBTYPE_CY: dts := 'MONEY';
       DBTYPE_R4: dts := 'REAL';
       DBTYPE_R8: dts := 'FLOAT';
-      DBTYPE_GUID: begin
-       //A special case: GUID counters are stored as UIDS with DEFAULT=GenGUID().
-       //They have to be declared as COUNTER UNIQUEIDENTIFIER though, else they
-       //work but look ugly in Access.
-        if Column.HasDefault and SameText(str(Column.Default), 'GenGuid()') then begin
-          dts := 'COUNTER UNIQUEIDENTIFIER';
-          NoDefault := true; //cancel DEFAULT=GenGuid()
-        end else
-          dts := 'UNIQUEIDENTIFIER';
-      end;
+      DBTYPE_GUID: dts := 'UNIQUEIDENTIFIER';
       DBTYPE_DATE: dts := 'DATETIME';
       DBTYPE_NUMERIC,
       DBTYPE_DECIMAL: begin
@@ -1067,7 +1055,7 @@ begin
     s := '['+Column.Name + '] ' + dts;
     if not bool(Column.IsNullable) then
       s := s + ' NOT NULL';
-    if (not NoDefault) and bool(Column.HasDefault) then
+    if bool(Column.HasDefault) then
       if VarIsNil(Column.Default) then
         s := s + ' DEFAULT NULL'
       else
@@ -1618,8 +1606,8 @@ begin
     err(msg);
 end;
 
-//Читает следующую команду из входного потока, соединяя при необходимости подряд идущие строки.
-//Сохраняет остаток строки. Учитывает настройку CrlfBreak.
+//Reads next command from input stream, joining consequtive lines when needed.
+//Saves the rest of the line. Minds CrlfBreak setting.
 type
   TCommentState = (csNone, csBrace, csSlash, csLine);
 
