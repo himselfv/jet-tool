@@ -639,6 +639,12 @@ begin
   Dump(conn, 'Foreign keys', adSchemaForeignKeys);
 
 //  Dump(conn, 'Properties', adSchemaProperties); ---not supported by Access
+
+//  Dump(conn, 'Procedure columns', adSchemaProcedureColumns); -- not supported by Access
+//  Dump(conn, 'Procedure parameters', adSchemaProcedureParameters); -- not supported by Access
+  Dump(conn, 'Procedures', adSchemaProcedures);
+
+//  Dump(conn, 'Provider types', adSchemaProviderTypes); -- nothing of interest 
 end;
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1339,6 +1345,7 @@ type
     Name: WideString;
     PrimaryTable: WideString;
     Columns: array of TForeignColumn;
+    PkName: OleVariant;
     OnUpdate: WideString;
     OnDelete: WideString;
     _Initialized: boolean;
@@ -1420,6 +1427,7 @@ begin
   while not rs.EOF do begin
     ForKey := ForKeys.Get(str(rs.Fields['FK_NAME'].Value));
     if not ForKey._Initialized then begin
+      ForKey.PkName := str(rs.Fields['PK_NAME'].Value);
       ForKey.PrimaryTable := str(rs.Fields['PK_TABLE_NAME'].Value);
       ForKey.OnUpdate := str(rs.Fields['UPDATE_RULE'].Value);
       ForKey.OnDelete := str(rs.Fields['DELETE_RULE'].Value);
@@ -1471,6 +1479,15 @@ begin
       s := s  + ' ON DELETE '+ForKey.OnDelete;
 
     s := s + ';';
+
+   //If PK_NAME=Null, FK is relation-only. These cannot be created by DDL
+   //at this point, and are pointless anyway (no check).
+   //Output them as a comment.
+    if VarIsNil(ForKey.PkName) or (ForKey.PkName='') then begin
+      s := '/* '+s+' */'#13#10
+        +'/* Relation-only Foreign Key commented out: cannot be defined with SQL. */';
+    end;
+
     writeln(s);
   end;
 
@@ -1519,7 +1536,7 @@ begin
     end;
   end;
 
- //One more time, with check constraints
+ //TODO: One more time, with check constraints
  (* Not implemented yet
   if NeedDumpCheckConstraints and not rs.BOF then begin
     rs.MoveFirst();
@@ -1569,6 +1586,44 @@ begin
   end;
 end;
 
+
+procedure DumpProcedures(conn: _Connection);
+var rs: _Recordset;
+  ProcedureName: WideString;
+  Description: WideString;
+  Definition: WideString;
+begin
+  rs := conn.OpenSchema(adSchemaProcedures, EmptyParam, EmptyParam);
+  while not rs.EOF do begin
+    ProcedureName := str(rs.Fields['PROCEDURE_NAME'].Value);
+    Description := str(rs.Fields['DESCRIPTION'].Value);
+
+    if DropObjects then
+      if PrivateExtensions then
+        writeln('DROP PROCEDURE ['+ProcedureName+'] /**WEAK**/;')
+      else
+        writeln('DROP PROCEDURE ['+ProcedureName+'];');
+    writeln('CREATE PROCEDURE ['+ProcedureName+'] AS');
+
+   //Access seems to keep it's own ';' at the end of DEFINITION
+    Definition := Trim(str(rs.Fields['PROCEDURE_DEFINITION'].Value));
+    if (Length(Definition)>0) and (Definition[Length(Definition)]=';') then
+      SetLength(Definition, Length(Definition)-1);
+
+    if HandleComments and (Description <> '') then begin
+      writeln(Definition);
+      if PrivateExtensions then
+        writeln('/**COMMENT* '+EncodeComment(Description)+' */;')
+      else
+        writeln('/* '+EncodeComment(Description)+' */;')
+    end else
+      writeln(Definition+';');
+    writeln('');
+
+    rs.MoveNext();
+  end;
+end;
+
 procedure DumpSql();
 var conn: _Connection;
 begin
@@ -1590,7 +1645,7 @@ begin
  //Procedures
   if NeedDumpProcedures then begin
     writeln('/* Procedures */');
-   // DumpProcedures(conn); //not implemented yet
+    DumpProcedures(conn); //not implemented yet
   end;
 
   writeln('/* Access SQL export data end. */');
@@ -1680,7 +1735,7 @@ begin
         Comment := csLine
       else
      //Command is over, return (save the rest of the line for later)
-      if pc^=';' then begin
+      if (pc^=';') and (Comment=csNone) then begin
         appendStr(pc, -1);
         restartStr(pc, +2);
         Result := true;
@@ -1740,6 +1795,18 @@ begin
   dao.TableDefs.Refresh;
   td := dao.TableDefs[TableName];
   daoSetOrAdd(dao, td.Fields[FieldName].Properties, 'Description', Comment);
+end;
+
+procedure jetSetProcedureComment(ProcedureName: WideString; Comment: WideString);
+var dao: Database;
+  td: QueryDef;
+begin
+  if LoggingMode=lmVerbose then
+    writeln('Procedure '+ProcedureName+' comment '+Comment);
+  dao := EstablishDaoConnection;
+  dao.QueryDefs.Refresh;
+  td := dao.QueryDefs[ProcedureName];
+  daoSetOrAdd(dao, td.Properties, 'Description', Comment);
 end;
 
 procedure PrintRecordset(rs: _Recordset);
@@ -1828,13 +1895,20 @@ begin
     end;
 
     Data := Match(cmd, ['CREATE', 'VIEW', 'AS']);
-    if (Length(Data)=5) and (Trim(Data[1])='' {between CREATE and VIEW}) then begin
+    if (Length(Data)=4) and (Trim(Data[1])='' {between CREATE and VIEW}) then begin
       TableName := CutIdBrackets(RemoveComments(Data[2]));
       if GetMeta(Data[3], 'COMMENT', strComment) then
-        jetSetTableComment(TableName, DecodeComment(strComment));
+        jetSetProcedureComment(TableName, DecodeComment(strComment));
+    end;
+
+    Data := Match(cmd, ['CREATE', 'PROCEDURE', 'AS']);
+    if (Length(Data)=4) and (Trim(Data[1])='' {between CREATE and PROCEDURE}) then begin
+      TableName := CutIdBrackets(RemoveComments(Data[2]));
+      if GetMeta(Data[3], 'COMMENT', strComment) then
+        jetSetProcedureComment(TableName, DecodeComment(strComment));
     end;
   end; //of PrivateExtensions
- 
+
 end;
 
 procedure ExecSql();
