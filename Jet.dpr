@@ -3,9 +3,22 @@ program Jet;
 {$APPTYPE CONSOLE}
 
 uses
-  SysUtils, Windows, ActiveX, Variants, AdoDb, OleDb, AdoInt, ComObj, WideStrUtils,
-  DAO_TLB, ADOX_TLB, CodepageUtils,                
-  StringUtils in 'StringUtils.pas';
+  SysUtils,
+  Windows,
+  ActiveX,
+  Variants,
+  AdoDb,
+  OleDb,
+  AdoInt,
+  ComObj,
+  WideStrUtils,
+  DAO_TLB,
+  ADOX_TLB,
+  CodepageUtils,
+  StringUtils in 'StringUtils.pas',
+  DaoDumper in 'DaoDumper.pas',
+  JetCommon in 'JetCommon.pas',
+  AdoxDumper in 'AdoxDumper.pas';
 
 (*
   Supported propietary extension comments:
@@ -62,9 +75,16 @@ uses
   Schema documentation:
     http://msdn.microsoft.com/en-us/library/ms675274(VS.85).aspx  :: Schema identifiers
     http://msdn.microsoft.com/en-us/library/ee265709(BTS.10).aspx  :: Some of the schemas, documented
+
+  Adding and modifying check constraints (not documented in MSDN):
+    http://www.w3schools.com/Sql/sql_check.asp
 *)
 
 {$UNDEF DEBUG}
+
+type
+  PWideCharArray = ^TWideCharArray;
+  TWideCharArray = array[0..16383] of WideChar;
 
 //Writes a string to error output.
 //All errors, usage info, hints go here. Redirect it somewhere if you don't need it.
@@ -91,6 +111,8 @@ begin
   err('  jet dump :: dump sql schema');
   err('  jet exec :: parse sql from input');
   err('  jet schema :: output internal jet schema reports');
+  err('  jet daoschema :: output DAO schema report');
+  err('  jet adoxschema :: output ADOX schema report');
   err('');
   err('Connection params:');
   err('  -c [connection-string] :: uses an ADO connection string. -dp is ignored');
@@ -356,7 +378,9 @@ begin
  //If requested to create a db, allow only filename connection.
   if NewDb and (Filename='') then
     BadUsage('Database creation is supported only when connecting by Filename.');
-  if NewDb and (WideSameText(Command, 'dump') or WideSameText(Command, 'schema'))
+  if NewDb and (WideSameText(Command, 'dump')
+    or WideSameText(Command, 'schema') or WideSameText(Command, 'daoschema')
+    or WideSameText(Command, 'adoxschema'))
   and (LoggingMode=lmVerbose) then begin
     err('NOTE: You asked to create a database and then dump its contents.');
     err('What the hell are you trying to do?');
@@ -389,7 +413,7 @@ begin
     ConnectionString := ConnectionString + 'Jet OLEDB:Database Password="'+DatabasePassword+'";';
 
  //Resolve default values depending on a type of input stream.
- //If we fail to guess the type, default to File (this can always be overriden directly!)
+ //If we fail to guess the type, default to File (this can always be overriden manually!)
   KeyboardInput := IsConsoleHandle(STD_INPUT_HANDLE) and (stdi='');
   if Errors=emDefault then
     if KeyboardInput then
@@ -408,43 +432,6 @@ begin
       CrlfBreak := tbFalse;
 end;
 
-function VarIsNil(val: OleVariant): boolean;
-begin
-  Result := VarIsClear(val) or VarIsNull(val);
-end;
-
-function str(val: OleVariant): string;
-begin
-  if VarIsNil(val) then
-    Result := ''
-  else Result := string(val);
-end;
-
-function int(val: OleVariant): integer;
-begin
-  if VarIsNil(val) then
-    Result := 0
-  else Result := integer(val);
-end;
-
-function uint(val: OleVariant): int64;
-begin
-  if VarIsNil(val) then
-    Result := 0
-  else Result := val;
-end;
-
-function bool(val: OleVariant): boolean;
-begin
-  if VarIsNil(val) then
-    Result := false
-  else Result := boolean(val);
-end;
-
-function includes(main, flag: cardinal): boolean;
-begin
-  Result := (main and flag) = flag;
-end;
 
 const
   Jet10 = 1;
@@ -590,31 +577,28 @@ end;
 ////////////////////////////////////////////////////////////////////////////////
 //// Schema --- Dumps many schema tables returned by Access
 
-procedure DumpFields(conn: _Connection; Schema: integer);
-var rs: _Recordset;
-  i: integer;
+procedure DumpRecordset(rs: _Recordset);
+var i: integer;
 begin
-  rs := conn.OpenSchema(Schema, EmptyParam, EmptyParam);
   while not rs.EOF do begin
     for i := 0 to rs.Fields.Count - 1 do
-      writeln(str(rs.Fields[i].Name)+'='+str(rs.Fields[i].Value));
+      writeln(rs.Fields[i].Name+'='+str(rs.Fields[i].Value));
     writeln('');
     rs.MoveNext();
   end;
 end;
 
-procedure Section(SectionName: string);
+procedure DumpSchema(conn: _Connection; Schema: integer);
+var rs: _Recordset;
 begin
-  writeln('');
-  writeln('');
-  writeln(SectionName);
-  writeln('=========================================');
+  rs := conn.OpenSchema(Schema, EmptyParam, EmptyParam);
+  DumpRecordset(rs);
 end;
 
 procedure Dump(conn: _Connection; SectionName: string; Schema: integer);
 begin
   Section(SectionName);
-  DumpFields(conn, Schema);
+  DumpSchema(conn, Schema);
 end;
 
 procedure PrintSchema();
@@ -644,7 +628,24 @@ begin
 //  Dump(conn, 'Procedure parameters', adSchemaProcedureParameters); -- not supported by Access
   Dump(conn, 'Procedures', adSchemaProcedures);
 
-//  Dump(conn, 'Provider types', adSchemaProviderTypes); -- nothing of interest 
+//  Dump(conn, 'Provider types', adSchemaProviderTypes); -- nothing of interest
+end;
+
+////////////////////////////////////////////////////////////////////////////////
+//// DaoSchema -- dumps DAO structure
+
+procedure PrintDaoSchema();
+begin
+  DaoDumper.PrintDaoSchema(GetDaoConnection);
+end;
+
+////////////////////////////////////////////////////////////////////////////////
+//// AdoxSchema -- dumps ADOX structure
+
+procedure PrintAdoxSchema();
+begin
+  AdoxDumper.PrintAdoxSchema(GetAdoxCatalog);
+  GetAdoxcatalog.Tables[0].Properties
 end;
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1040,7 +1041,7 @@ begin
 
       DBTYPE_WSTR:
        //If you specify TEXT, Access makes LONGTEXT (Memo) field, if TEXT(len) then the usual limited text.
-       //But we'll go a safe route.
+       //But we'll go the safe route.
         if Includes(Column.Flags, DBCOLUMNFLAGS_ISLONG) then
           dts := 'LONGTEXT' //"Memo field"
         else begin
@@ -1495,6 +1496,91 @@ begin
     writeln('');
 end;
 
+(*
+//Dumps check constraint creation commands for a given table
+procedure DumpCheckConstraint(conn: _Connection; TableName: WideString);
+var rs: _Recordset;
+  ForKeys: TForeignKeys;
+  ForKey: PForeignKey;
+  s, s_for, s_ref: WideString;
+  i, j: integer;
+begin
+  rs := conn.OpenSchema(adSchemaCheckConstraints,
+    VarArrayOf([Unassigned, Unassigned, Unassigned,
+      Unassigned, Unassigned, TableName]), EmptyParam);
+  ForKeys.Clear;
+  while not rs.EOF do begin
+    ForKey := ForKeys.Get(str(rs.Fields['FK_NAME'].Value));
+    if not ForKey._Initialized then begin
+      ForKey.PkName := str(rs.Fields['PK_NAME'].Value);
+      ForKey.PrimaryTable := str(rs.Fields['PK_TABLE_NAME'].Value);
+      ForKey.OnUpdate := str(rs.Fields['UPDATE_RULE'].Value);
+      ForKey.OnDelete := str(rs.Fields['DELETE_RULE'].Value);
+
+     //These are used internally when no action is defined.
+     //Maybe they would have worked in CONSTRAINT too, but let's follow the standard.
+      if WideSameText(ForKey.OnUpdate, 'NO ACTION') then
+        ForKey.OnUpdate := '';
+      if WideSameText(ForKey.OnDelete, 'NO ACTION') then
+        ForKey.OnDelete := '';
+
+      ForKey._Initialized := true;
+    end;
+
+    with ForKey.AddColumn^ do begin
+      PrimaryKey := str(rs.Fields['PK_COLUMN_NAME'].Value);
+      ForeignKey := str(rs.Fields['FK_COLUMN_NAME'].Value);
+      Ordinal := int(rs.Fields['ORDINAL'].Value);
+    end;
+
+    rs.MoveNext;
+  end;
+
+  if Length(ForKeys.data)>0 then
+    writeln('/* Foreign keys for '+TableName+' */');
+
+  for i := 0 to Length(ForKeys.data) - 1 do begin
+    ForKey := @ForKeys.Data[i];
+    ForKey.SortColumns;
+
+    s := 'ALTER TABLE ['+TableName+'] ADD CONSTRAINT ['+ForKey.Name+'] FOREIGN KEY (';
+
+    if Length(ForKey.Columns)<=0 then begin
+      Warning('Foreign key '+ForKey.Name+' has a definition but no columns. '
+        +'This is pretty damn strange, mail a detailed bug report please.');
+    end;
+
+    s_for := ForKey.Columns[0].ForeignKey;
+    s_ref := ForKey.Columns[0].PrimaryKey;
+    for j := 1 to Length(ForKey.Columns) - 1 do begin
+      s_for := s_for + ', ' + ForKey.Columns[j].ForeignKey;
+      s_ref := s_ref + ', ' + ForKey.Columns[j].PrimaryKey;
+    end;
+
+    s := s + s_for + ') REFERENCES ['+ForKey.PrimaryTable+'] (' + s_ref + ')';
+    if ForKey.OnUpdate<>'' then
+      s := s  + ' ON UPDATE '+ForKey.OnUpdate;
+    if ForKey.OnDelete<>'' then
+      s := s  + ' ON DELETE '+ForKey.OnDelete;
+
+    s := s + ';';
+
+   //If PK_NAME=Null, FK is relation-only. These cannot be created by DDL
+   //at this point, and are pointless anyway (no check).
+   //Output them as a comment.
+    if VarIsNil(ForKey.PkName) or (ForKey.PkName='') then begin
+      s := '/* '+s+' */'#13#10
+        +'/* Relation-only Foreign Key commented out: cannot be defined with SQL. */';
+    end;
+
+    writeln(s);
+  end;
+
+  if Length(ForKeys.data)>0 then
+    writeln('');
+end;
+*)
+
 //Dumps table creation commands, then foreign keys and check constraints (if needed)
 procedure DumpTables(conn: _Connection);
 var rs: _Recordset;
@@ -1537,7 +1623,7 @@ begin
   end;
 
  //TODO: One more time, with check constraints
- (* Not implemented yet
+ (*
   if NeedDumpCheckConstraints and not rs.BOF then begin
     rs.MoveFirst();
     while not rs.EOF do begin
@@ -1975,7 +2061,13 @@ begin
     else
     if WideSameText(Command, 'schema') then
       PrintSchema()
-    else      
+    else
+    if WideSameText(Command, 'daoschema') then
+      PrintDaoSchema()
+    else
+    if WideSameText(Command, 'adoxschema') then
+      PrintAdoxSchema()
+    else
     if Command='' then
       BadUsage('No command specified')
     else
