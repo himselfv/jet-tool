@@ -3,18 +3,8 @@ program Jet;
 {$APPTYPE CONSOLE}
 
 uses
-  SysUtils,
-  Windows,
-  ActiveX,
-  Variants,
-  AdoDb,
-  OleDb,
-  AdoInt,
-  ComObj,
-  WideStrUtils,
-  DAO_TLB,
-  ADOX_TLB,
-  CodepageUtils,
+  SysUtils, Windows, ActiveX, Variants, AdoDb, OleDb, AdoInt, ComObj, WideStrUtils,
+  DAO_TLB, ADOX_TLB, CodepageUtils,
   StringUtils in 'StringUtils.pas',
   DaoDumper in 'DaoDumper.pas',
   JetCommon in 'JetCommon.pas',
@@ -1646,12 +1636,17 @@ begin
     TableName := str(rs.Fields['TABLE_NAME'].Value);
     Description := str(rs.Fields['DESCRIPTION'].Value);
 
+  (*
+    Раньше использовалось CREATE VIEW, но хотя суть та же,
+    Access не поддерживает в нём сложные запросы
+    (даже если в базе они объявлены, как VIEW).
+  *)
     if DropObjects then
       if PrivateExtensions then
-        writeln('DROP VIEW ['+TableName+'] /**WEAK**/;')
+        writeln('DROP PROCEDURE ['+TableName+'] /**WEAK**/;')
       else
-        writeln('DROP VIEW ['+TableName+'];');
-    writeln('CREATE VIEW ['+TableName+'] AS');
+        writeln('DROP PROCEDURE ['+TableName+'];');
+    writeln('CREATE PROCEDURE ['+TableName+'] AS');
 
    //Access seems to keep it's own ';' at the end of DEFINITION
     Definition := Trim(str(rs.Fields['VIEW_DEFINITION'].Value));
@@ -1980,6 +1975,7 @@ begin
         end;
     end;
 
+   (* VIEW - это во всех отношениях процедуры *)
     Data := Match(cmd, ['CREATE', 'VIEW', 'AS']);
     if (Length(Data)=4) and (Trim(Data[1])='' {between CREATE and VIEW}) then begin
       TableName := CutIdBrackets(RemoveComments(Data[2]));
