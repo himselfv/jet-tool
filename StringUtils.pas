@@ -295,7 +295,7 @@ var ps, pc, pe: PWideChar;
 
    //One space at most at the end
     Dec(pe); //now points to the last symbol
-    if pe^=' ' then begin
+    if (pe^=' ') and (integer(pc) < integer(pe)) then begin
       while (pe^=' ') and (integer(pc) < integer(pe)) do
         Dec(pe);
       Inc(pe); //one space
