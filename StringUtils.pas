@@ -34,15 +34,20 @@ function Marker(s, e: WideString; f: TMarkerFlags=[]): TMarker;
 procedure Append(var mk: TMarkers; r: TMarkers);
 
 var
- //These will be populated on initialization.
- //If they were consts, they would be type incompatible, plus it would have been
- //a pain to pass both pointer and length everywhere
+ (*
+   These will be populated on initialization.
+   If they were consts, they would be type incompatible, plus it would have been
+   a pain to pass both pointer and length everywhere.
+ *)
 
  //For RemoveComments()
   CommentMarkers: TMarkers;
 
+ //Everything in these is considered string literal (comment openers ignored)
+  StringLiteralMarkers: TMarkers;
+
  //Sequences in which final ';' is ignored
- //Sequences, in which CREATE TABLE field set ',' separator is ignored
+ //Sequences, in which CREATE TABLE separator ',' is ignored
  //Match()
   NoEndCommandMarkers: TMarkers;
 
@@ -219,6 +224,9 @@ function WStrPosEnd(pc: PWideChar; m: TMarkers; mk: TMarker): PWideChar;
 var i: integer;
   SpecSymbol: boolean;
 begin
+ //Skip opener
+  Inc(pc, Length(mk.s));
+
  //To find the block ED, we need to scan till the end markers:
  // I. For simple comments: minding specsymbols.
  // II. For nested comments:
@@ -345,10 +353,14 @@ end;
 //Removes all supported comments, linefeeds.
 function RemoveCommentsI(s: WideString; m: TMarkers): WideString;
 var i: integer;
+ im: TMarkers;
 begin
+  im := Copy(m); //Blocks to ignore comments in.
+  Append(im, StringLiteralMarkers);
+
   for i := 0 to Length(m)-1 do
-    s := RemoveParts(s, m[i], m);
-  Result := RemoveParts(s, EndLineMarker, m);
+    s := RemoveParts(s, m[i], im);
+  Result := RemoveParts(s, EndLineMarker, im);
 end;
 
 function RemoveComments(s: WideString): WideString;
@@ -647,7 +659,7 @@ var i: integer;
 begin
   SetLength(mk, Length(mk)+Length(r));
   for i := 0 to Length(r) - 1 do
-    mk[Length(mk)+i] := r[i];
+    mk[Length(mk)-Length(r)+i] := r[i];
 end;
 
 initialization
@@ -656,12 +668,15 @@ initialization
   CommentMarkers[1] := Marker('/*', '*/', [mfEscaping]);
   CommentMarkers[2] := Marker('--', #13#10, [mfKeepEd]);
 
+  SetLength(StringLiteralMarkers, 2);
+  StringLiteralMarkers[0] := Marker('''', '''', [mfEscaping]);
+  StringLiteralMarkers[1] := Marker('"', '"', [mfEscaping]);
+
   NoEndCommandMarkers := Copy(CommentMarkers);
+  Append(NoEndCommandMarkers, StringLiteralMarkers);
   SetLength(NoEndCommandMarkers, 7);
-  NoEndCommandMarkers[3] := Marker('[', ']');
-  NoEndCommandMarkers[4] := Marker('(', ')', [mfNesting]);
-  NoEndCommandMarkers[5] := Marker('''', '''', [mfEscaping]);
-  NoEndCommandMarkers[6] := Marker('"', '"', [mfEscaping]);
+  NoEndCommandMarkers[5] := Marker('[', ']');
+  NoEndCommandMarkers[6] := Marker('(', ')', [mfNesting]);
 
   EndLineMarker := Marker(#13, #10);
 end.
