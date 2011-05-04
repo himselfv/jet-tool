@@ -3,7 +3,7 @@ program Jet;
 {$APPTYPE CONSOLE}
 
 uses
-  SysUtils, Windows, ActiveX, Variants, AdoDb, OleDb, AdoInt, ComObj, WideStrUtils,
+  SysUtils, Windows, ActiveX, Variants, AdoDb, OleDb, AdoInt, ComObj, UniStrUtils,
   DAO_TLB, ADOX_TLB, CodepageUtils,
   StringUtils in 'StringUtils.pas',
   DaoDumper in 'DaoDumper.pas',
