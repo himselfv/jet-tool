@@ -4,7 +4,7 @@ program Jet;
 
 uses
   SysUtils, Windows, ActiveX, Variants, AdoDb, OleDb, AdoInt, ComObj, UniStrUtils,
-  DAO_TLB, ADOX_TLB, CodepageUtils,
+  DAO_TLB, ADOX_TLB, StreamUtils,
   StringUtils in 'StringUtils.pas',
   DaoDumper in 'DaoDumper.pas',
   JetCommon in 'JetCommon.pas',
