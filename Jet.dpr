@@ -661,7 +661,7 @@ var
 function JetFormatSettings: TFormatSettings;
 begin
   if not FJetFormatSettingsInitialized then begin
-    GetLocaleFormatSettings(GetThreadLocale, FJetFormatSettings);
+    FJetFormatSettings := TFormatSettings.Create();
     with FJetFormatSettings do begin
       DecimalSeparator := '.';
       DateSeparator := '-';
@@ -1744,8 +1744,17 @@ end;
 
 //Reads next command from input stream, joining consequtive lines when needed.
 //Saves the rest of the line. Minds CrlfBreak setting.
+
 type
-  TCommentState = (csNone, csBrace, csSlash, csLine);
+  TCommentState = (
+    csNone,
+    csBrace,  // {
+    csSlash,  // /*
+    csLine,   // ends with newline (e.g. -- comment)
+    csQuote,      // '
+    csBacktick,   // `
+    csDoubleQuote // "
+  );
 
 var read_buf: WideString;
 function ReadNextCmd(out cmd: WideString): boolean;
@@ -1805,6 +1814,15 @@ begin
       if (pc^='/') and prevCharIs(@read_buf[1], pc, '*') and (Comment=csSlash) then
         Comment := csNone
       else
+      if (pc^='''') and (Comment=csQuote) then
+        Comment := csNone
+      else
+      if (pc^='`') and (Comment=csBacktick) then
+        Comment := csNone
+      else
+      if (pc^='"') and (Comment=csDoubleQuote) then
+        Comment := csNone
+      else
      //Comment openers
       if (pc^='{') and (Comment=csNone) then
         Comment := csBrace
@@ -1814,6 +1832,15 @@ begin
       else
       if (pc^='-') and prevCharIs(@read_buf[1], pc, '-') and (Comment=csNone) then
         Comment := csLine
+      else
+      if (pc^='''') and (Comment=csNone) then
+        Comment := csQuote
+      else
+      if (pc^='`') and (Comment=csNone) then
+        Comment := csBacktick
+      else
+      if (pc^='"') and (Comment=csNone) then
+        Comment := csDoubleQuote
       else
      //Command is over, return (save the rest of the line for later)
       if (pc^=';') and (Comment=csNone) then begin
