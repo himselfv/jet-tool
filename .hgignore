@@ -1,0 +1,18 @@
+syntax: glob
+__history
+*.~*
+*.identcache
+*.local
+*.dcu
+
+# Secondary project files are not stored at this time
+*.res
+*.groupproj
+*.dproj
+*.bdsproj
+
+# Binaries
+*.exe
+*.zip
+*.rar
+*.cmd
