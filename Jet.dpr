@@ -78,7 +78,7 @@ type
 
 //Writes a string to error output.
 //All errors, usage info, hints go here. Redirect it somewhere if you don't need it.
-procedure err(msg: WideString);
+procedure err(msg: UniString);
 begin
   writeln(ErrOutput, msg);
 end;
@@ -143,12 +143,12 @@ begin
   err('With private extensions enabled, **WEAK** commands do not produce errors in any way (messages, stop).')
 end;
 
-procedure BadUsage(msg: WideString='');
+procedure BadUsage(msg: UniString='');
 begin
   raise EUsage.Create(msg);
 end;
 
-procedure Redefined(term: string; old, new: WideString);
+procedure Redefined(term: string; old, new: UniString);
 begin
   raise EUsage.Create(term+' already defined: '+old+'. Cannot redefine to "'+new+'".');
 end;
@@ -163,13 +163,13 @@ type
   TTriBool = (tbDefault, tbTrue, tbFalse);
 
 var
-  Command: WideString;
+  Command: UniString;
  //Connection
-  ConnectionString: WideString;
-  DataSourceName: WideString;
-  Filename: WideString;
-  User, Password: WideString;
-  DatabasePassword: WideString;
+  ConnectionString: UniString;
+  DataSourceName: UniString;
+  Filename: UniString;
+  User, Password: UniString;
+  DatabasePassword: UniString;
   NewDb: boolean;
   ForceNewDb: boolean;
  //Dump contents
@@ -186,7 +186,7 @@ var
   LoggingMode: TLoggingMode = lmDefault;
   Errors: TErrorHandlingMode = emDefault;
  //Redirects
-  stdi, stdo, stde: WideString;
+  stdi, stdo, stde: UniString;
   CrlfBreak: TTriBool = tbDefault;
 
 var //Dynamic properties
@@ -194,17 +194,17 @@ var //Dynamic properties
 
 procedure ParseCommandLine;
 var i: integer;
-  s: WideString;
+  s: UniString;
   KeyboardInput: boolean;
 
-  procedure Define(var Term: WideString; TermName: string; Value: WideString);
+  procedure Define(var Term: UniString; TermName: string; Value: UniString);
   begin
     if Term <> '' then
       Redefined(TermName, Term, Value);
     Term := Value;
   end;
 
-  function NextParam(key, param: WideString): WideString;
+  function NextParam(key, param: UniString): UniString;
   begin
     Inc(i);
     if i > ParamCount then
@@ -510,7 +510,7 @@ begin
   DaoEngine := CoDbEngine.Create;
   if Filename<>'' then begin
     if DatabasePassword<>'' then
-      Params := WideString('MS Access;pwd=')+DatabasePassword
+      Params := UniString('MS Access;pwd=')+DatabasePassword
     else
       Params := '';
     Result := DaoEngine.OpenDatabase(Filename, False, False, Params);
@@ -534,7 +534,7 @@ begin
   DbEngine.Idle(dbRefreshCache);
   if Filename<>'' then begin
     if DatabasePassword<>'' then
-      Params := WideString('MS Access;pwd=')+DatabasePassword
+      Params := UniString('MS Access;pwd=')+DatabasePassword
     else
       Params := '';
     Result := DbEngine.OpenDatabase(Filename, False, False, Params);
@@ -646,7 +646,7 @@ end;
  This should be used in cases where the warning is really important (something cannot be done,
  some information ommited). If you just want to give a hint, use "err(msg)";
 *)
-procedure Warning(msg: WideString);
+procedure Warning(msg: UniString);
 begin
   writeln('/* !!! Warning: '+msg+' */');
   if LoggingMode<>lmSilent then
@@ -931,7 +931,7 @@ begin
 end;
 {$ENDREGION}
 
-function GetTableText(conn: _Connection; Table: WideString): WideString;
+function GetTableText(conn: _Connection; Table: UniString): UniString;
 var rs: _Recordset;
   Columns: TColumns;
   Column: TColumnDesc;
@@ -1078,22 +1078,22 @@ end;
 {$REGION 'Indexes'}
 type
   TIndexColumnDesc = record
-    Name: WideString;
+    Name: UniString;
     Collation: integer;
     OrdinalPosition: integer;
   end;
   PIndexColumnDesc = ^TIndexColumnDesc;
 
   TIndexDesc = record
-    Name: WideString;
+    Name: UniString;
     PrimaryKey: boolean;
     Unique: boolean;
     Nulls: integer; //DBPROP_IN_*
     Columns: array of TIndexColumnDesc;
     _Initialized: boolean; //indicates that the object properties has been set
     _Declared: boolean; //set after index has been declared inline [field definition]
-    function ContainsColumn(ColumnName: WideString): boolean;
-    function AddColumn(ColumnName: WideString): PIndexColumnDesc;
+    function ContainsColumn(ColumnName: UniString): boolean;
+    function AddColumn(ColumnName: UniString): PIndexColumnDesc;
     procedure SortColumns;
   end;
   PIndexDesc = ^TIndexDesc;
@@ -1101,11 +1101,11 @@ type
   TIndexes = record
     data: array of TIndexDesc;
     procedure Clear;
-    function Find(IndexName: WideString): PIndexDesc;
-    function Get(IndexName: WideString): PIndexDesc;
+    function Find(IndexName: UniString): PIndexDesc;
+    function Get(IndexName: UniString): PIndexDesc;
   end;
 
-function TIndexDesc.ContainsColumn(ColumnName: WideString): boolean;
+function TIndexDesc.ContainsColumn(ColumnName: UniString): boolean;
 var i: integer;
 begin
   Result := false;
@@ -1116,7 +1116,7 @@ begin
     end;
 end;
 
-function TIndexDesc.AddColumn(ColumnName: WideString): PIndexColumnDesc;
+function TIndexDesc.AddColumn(ColumnName: UniString): PIndexColumnDesc;
 begin
   if ContainsColumn(ColumnName) then begin
     Result := nil;
@@ -1151,7 +1151,7 @@ begin
   SetLength(data, 0);
 end;
 
-function TIndexes.Find(IndexName: WideString): PIndexDesc;
+function TIndexes.Find(IndexName: UniString): PIndexDesc;
 var i: integer;
 begin
   Result := nil;
@@ -1162,7 +1162,7 @@ begin
     end;
 end;
 
-function TIndexes.Get(IndexName: WideString): PIndexDesc;
+function TIndexes.Get(IndexName: UniString): PIndexDesc;
 begin
   Result := Find(IndexName);
   if Result<>nil then exit;
@@ -1178,15 +1178,15 @@ end;
 {$REGION 'Constraints'}
 type
   TConstraintDesc = record
-    Name: WideString;
+    Name: UniString;
   end;
   PConstraintDesc = ^TConstraintDesc;
 
   TConstraints = record
     data: array of TConstraintDesc;
     procedure Clear;
-    function Find(ConstraintName: WideString): PConstraintDesc;
-    procedure Add(ConstraintName: WideString);
+    function Find(ConstraintName: UniString): PConstraintDesc;
+    procedure Add(ConstraintName: UniString);
   end;
 
 procedure TConstraints.Clear;
@@ -1194,7 +1194,7 @@ begin
   SetLength(Data, 0);
 end;
 
-function TConstraints.Find(ConstraintName: WideString): PConstraintDesc;
+function TConstraints.Find(ConstraintName: UniString): PConstraintDesc;
 var i: integer;
 begin
   Result := nil;
@@ -1205,7 +1205,7 @@ begin
     end;
 end;
 
-procedure TConstraints.Add(ConstraintName: WideString);
+procedure TConstraints.Add(ConstraintName: UniString);
 var Constraint: PConstraintDesc;
 begin
   Constraint := Find(ConstraintName);
@@ -1216,10 +1216,10 @@ end;
 {$ENDREGION}
 
 //Returns CONSTRAINT list for a given table.
-function GetTableIndexes(conn: _Connection; Table: WideString): TIndexes;
+function GetTableIndexes(conn: _Connection; Table: UniString): TIndexes;
 var rs: _Recordset;
   Index: PIndexDesc;
-  IndexName: WideString;
+  IndexName: UniString;
   Column: PIndexColumnDesc;
   Constraints: TConstraints;
 begin
@@ -1272,7 +1272,7 @@ procedure DumpIndexes(conn: _Connection; TableName: string);
 var Indexes: TIndexes;
   Index: PIndexDesc;
   i, j: integer;
-  s, fl, tmp: WideString;
+  s, fl, tmp: UniString;
   Multiline: boolean;
 begin
   Indexes := GetTableIndexes(conn, TableName);
@@ -1326,19 +1326,19 @@ end;
 {$REGION 'ForeignKeys'}
 type
   TForeignColumn = record
-    PrimaryKey: WideString;
-    ForeignKey: WideString;
+    PrimaryKey: UniString;
+    ForeignKey: UniString;
     Ordinal: integer;
   end;
   PForeignColumn = ^TForeignColumn;
 
   TForeignKey = record
-    Name: WideString;
-    PrimaryTable: WideString;
+    Name: UniString;
+    PrimaryTable: UniString;
     Columns: array of TForeignColumn;
     PkName: OleVariant;
-    OnUpdate: WideString;
-    OnDelete: WideString;
+    OnUpdate: UniString;
+    OnDelete: UniString;
     _Initialized: boolean;
     procedure SortColumns;
     function AddColumn: PForeignColumn;
@@ -1348,8 +1348,8 @@ type
   TForeignKeys = record
     data: array of TForeignKey;
     procedure Clear;
-    function Find(ForeignKeyName: WideString): PForeignKey;
-    function Get(ForeignKeyName: WideString): PForeignKey;
+    function Find(ForeignKeyName: UniString): PForeignKey;
+    function Get(ForeignKeyName: UniString): PForeignKey;
   end;
 
 procedure TForeignKey.SortColumns;
@@ -1381,7 +1381,7 @@ begin
   SetLength(data, 0);
 end;
 
-function TForeignKeys.Find(ForeignKeyName: WideString): PForeignKey;
+function TForeignKeys.Find(ForeignKeyName: UniString): PForeignKey;
 var i: integer;
 begin
   Result := nil;
@@ -1392,7 +1392,7 @@ begin
     end;
 end;
 
-function TForeignKeys.Get(ForeignKeyName: WideString): PForeignKey;
+function TForeignKeys.Get(ForeignKeyName: UniString): PForeignKey;
 begin
   Result := Find(ForeignKeyName);
   if Result <> nil then exit;
@@ -1404,11 +1404,11 @@ end;
 {$ENDREGION}
 
 //Dumps foreign key creation commands for a given table
-procedure DumpForeignKeys(conn: _Connection; TableName: WideString);
+procedure DumpForeignKeys(conn: _Connection; TableName: UniString);
 var rs: _Recordset;
   ForKeys: TForeignKeys;
   ForKey: PForeignKey;
-  s, s_for, s_ref: WideString;
+  s, s_for, s_ref: UniString;
   i, j: integer;
 begin
   rs := conn.OpenSchema(adSchemaForeignKeys,
@@ -1488,11 +1488,11 @@ end;
 
 (*
 //Dumps check constraint creation commands for a given table
-procedure DumpCheckConstraint(conn: _Connection; TableName: WideString);
+procedure DumpCheckConstraint(conn: _Connection; TableName: UniString);
 var rs: _Recordset;
   ForKeys: TForeignKeys;
   ForKey: PForeignKey;
-  s, s_for, s_ref: WideString;
+  s, s_for, s_ref: UniString;
   i, j: integer;
 begin
   rs := conn.OpenSchema(adSchemaCheckConstraints,
@@ -1574,8 +1574,8 @@ end;
 //Dumps table creation commands, then foreign keys and check constraints (if needed)
 procedure DumpTables(conn: _Connection);
 var rs: _Recordset;
-  TableName: WideString;
-  Description: WideString;
+  TableName: UniString;
+  Description: UniString;
 begin
   rs := conn.OpenSchema(adSchemaTables,
     VarArrayOf([Unassigned, Unassigned, Unassigned, 'TABLE']), EmptyParam);
@@ -1627,9 +1627,9 @@ end;
 
 procedure DumpViews(conn: _Connection);
 var rs: _Recordset;
-  TableName: WideString;
-  Description: WideString;
-  Definition: WideString;
+  TableName: UniString;
+  Description: UniString;
+  Definition: UniString;
 begin
   rs := conn.OpenSchema(adSchemaViews, EmptyParam, EmptyParam);
   while not rs.EOF do begin
@@ -1670,9 +1670,9 @@ end;
 
 procedure DumpProcedures(conn: _Connection);
 var rs: _Recordset;
-  ProcedureName: WideString;
-  Description: WideString;
-  Definition: WideString;
+  ProcedureName: UniString;
+  Description: UniString;
+  Definition: UniString;
 begin
   rs := conn.OpenSchema(adSchemaProcedures, EmptyParam, EmptyParam);
   while not rs.EOF do begin
@@ -1736,7 +1736,7 @@ end;
 ///  ExecSql --- Executes SQL from Input
 
 //Outputs a warning which should only be visible if we're not in silent mode.
-procedure Complain(msg: WideString);
+procedure Complain(msg: UniString);
 begin
   if LoggingMode<>lmSilent then
     err(msg);
@@ -1756,11 +1756,11 @@ type
     csDoubleQuote // "
   );
 
-var read_buf: WideString;
-function ReadNextCmd(out cmd: WideString): boolean;
+var read_buf: UniString;
+function ReadNextCmd(out cmd: UniString): boolean;
 var pc: PWideChar;
   Comment: TCommentState;
-  ts: WideString;
+  ts: UniString;
   ind: integer;
 
   procedure appendStr(pc: PWideChar; shift:integer);
@@ -1866,7 +1866,7 @@ begin
     Result := cmd <> '';
 end;
 
-procedure daoSetOrAdd(Dao: Database; Props: DAO_TLB.Properties; Name, Value: WideString);
+procedure daoSetOrAdd(Dao: Database; Props: DAO_TLB.Properties; Name, Value: UniString);
 var Prop: DAO_TLB.Property_;
 begin
   try
@@ -1881,7 +1881,7 @@ begin
   end;
 end;
 
-procedure jetSetTableComment(TableName: WideString; Comment: WideString);
+procedure jetSetTableComment(TableName: UniString; Comment: UniString);
 var dao: Database;
   td: TableDef;
 begin
@@ -1893,7 +1893,7 @@ begin
   daoSetOrAdd(dao, td.Properties, 'Description', Comment);
 end;
 
-procedure jetSetFieldComment(TableName, FieldName: WideString; Comment: WideString);
+procedure jetSetFieldComment(TableName, FieldName: UniString; Comment: UniString);
  var dao: Database;
    td: TableDef;
 begin
@@ -1905,7 +1905,7 @@ begin
   daoSetOrAdd(dao, td.Fields[FieldName].Properties, 'Description', Comment);
 end;
 
-procedure jetSetProcedureComment(ProcedureName: WideString; Comment: WideString);
+procedure jetSetProcedureComment(ProcedureName: UniString; Comment: UniString);
 var dao: Database;
   td: QueryDef;
 begin
@@ -1929,15 +1929,15 @@ begin
   end;
 end;
 
-procedure ExecCmd(conn: _Connection; cmd: WideString);
+procedure ExecCmd(conn: _Connection; cmd: UniString);
 var RecordsAffected: OleVariant;
   Weak: boolean;
-  Data: TWideStringArray;
-  Fields: TWideStringArray;
-  strComment: WideString;
-  TableName, FieldName: WideString;
+  Data: TUniStringArray;
+  Fields: TUniStringArray;
+  strComment: UniString;
+  TableName, FieldName: UniString;
   i: integer;
-  tr_cmd: WideString;
+  tr_cmd: UniString;
   rs: _Recordset;
 begin
   if LoggingMode=lmVerbose then begin
@@ -1967,7 +1967,7 @@ begin
       end;
 
       if (Errors=emIgnore) and (LoggingMode<>lmSilent) then
-        err(E.Classname + ': ' + WinToOem(E.Message) + '(0x' + IntToHex(E.ErrorCode, 8) + ')');
+        err(E.Classname + ': ' + string(WinToOem(AnsiString(E.Message))) + '(0x' + IntToHex(E.ErrorCode, 8) + ')');
       if Errors<>emIgnore then
         raise; //Re-raise it to be caught in Main()
       exit; //else just exit
@@ -2022,7 +2022,7 @@ end;
 
 procedure ExecSql();
 var conn: _Connection;
-  cmd: WideString;
+  cmd: UniString;
 begin
   conn := GetAdoConnection;
   while ReadNextCmd(cmd) do
@@ -2032,7 +2032,7 @@ end;
 ////////////////////////////////////////////////////////////////////////////////
 
 //Leaks file handles! By design. We don't care, they'll be released on exit anyway.
-procedure RedirectIo(nStdHandle: dword; filename: WideString);
+procedure RedirectIo(nStdHandle: dword; filename: UniString);
 var hFile: THandle;
 begin
   if nStdHandle=STD_INPUT_HANDLE then
@@ -2107,7 +2107,7 @@ begin
       ExitCode := 2;
     end;
     on E:EOleException do begin
-      err(E.Classname + ': ' + WinToOem(E.Message) + '(0x' + IntToHex(E.ErrorCode, 8) + ')');
+      err(E.Classname + ': ' + string(WinToOem(AnsiString(E.Message))) + '(0x' + IntToHex(E.ErrorCode, 8) + ')');
       ExitCode := 3;
     end;
     on E:Exception do begin

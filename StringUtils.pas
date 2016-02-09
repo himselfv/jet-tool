@@ -8,6 +8,12 @@ uses SysUtils, WideStrUtils;
 *)
 
 type
+ {$IFDEF UNICODE}
+  UniString = string;
+ {$ELSE}
+  UniString = WideString;
+ {$ENDIF}
+
   TMarkerFlag = (
     mfKeepOp,   //do not consider op/ed to be part of the contents
     mfKeepEd,   //for example, keep them when deleting comments
@@ -22,15 +28,15 @@ type
  //In nesting blocks, escaping is not allowed.
 
   TMarker = record
-    s: Widestring;
-    e: Widestring;
+    s: UniString;
+    e: UniString;
     f: TMarkerFlags;
   end;
   PMarker = ^TMarker;
 
   TMarkers = array of TMarker;
 
-function Marker(s, e: WideString; f: TMarkerFlags=[]): TMarker;
+function Marker(s, e: UniString; f: TMarkerFlags=[]): TMarker;
 procedure Append(var mk: TMarkers; r: TMarkers);
 
 var
@@ -59,22 +65,22 @@ function charPos(start, ptr: PWideChar): integer;
 function prevChar(ptr: PWideChar): PWideChar;
 function prevCharIs(start, ptr: PWideChar; c: WideChar): boolean;
 function nextChar(ptr: PWideChar): PWideChar;
-function SubStr(pc, pe: PWideChar): WideString;
+function SubStr(pc, pe: PWideChar): UniString;
 procedure Adjust(ups, upc, ps: PWideChar; out pc: PWideChar);
 
-function GetMeta(s: Widestring; meta: WideString; out content: WideString): boolean;
-function MetaPresent(s, meta: WideString): boolean;
+function GetMeta(s: UniString; meta: UniString; out content: UniString): boolean;
+function MetaPresent(s, meta: UniString): boolean;
 
 function WStrPosIn(ps, pe, pattern: PWideChar): PWideChar;
 function WStrMatch(main, sub: PWideChar): boolean;
 function WStrPosEnd(pc: PWideChar; m: TMarkers; mk: TMarker): PWideChar;
 
-function RemoveParts(s: WideString; mk: TMarker; IgnoreBlocks: TMarkers): string;
-function RemoveCommentsI(s: WideString; m: TMarkers): WideString;
-function RemoveComments(s: WideString): WideString;
+function RemoveParts(s: UniString; mk: TMarker; IgnoreBlocks: TMarkers): string;
+function RemoveCommentsI(s: UniString; m: TMarkers): UniString;
+function RemoveComments(s: UniString): UniString;
 
-function CommentTypeOpener(cType: integer): WideString;
-function CommentTypeCloser(cType: integer): WideString;
+function CommentTypeOpener(cType: integer): UniString;
+function CommentTypeCloser(cType: integer): UniString;
 function WStrPosAnyCommentI(ps: PWideChar; m: TMarkers; out pc: PWideChar): integer;
 function WStrPosAnyComment(ps: PWideChar; out pc: PWideChar): integer;
 function WStrPosCommentCloserI(pc: PWideChar; cType: integer; m: TMarkers): PWideChar;
@@ -86,15 +92,15 @@ function WStrPosIgnoreComments(ps: PWideChar; pattern: PWideChar): PWideChar;
 
 
 type
-  TWideStringArray = array of WideString;
+  TUniStringArray = array of UniString;
 
-function MatchI(s: WideString; parts: array of WideString; m: TMarkers): TWideStringArray;
-function Match(s: WideString; parts: array of WideString): TWideStringArray;
-function CutIdBrackets(s: WideString): WideString;
-function SplitI(s: WideString; sep: WideChar; m: TMarkers): TWideStringArray;
-function Split(s: WideString; sep: WideChar): TWideStringArray;
+function MatchI(s: UniString; parts: array of UniString; m: TMarkers): TUniStringArray;
+function Match(s: UniString; parts: array of UniString): TUniStringArray;
+function CutIdBrackets(s: UniString): UniString;
+function SplitI(s: UniString; sep: WideChar; m: TMarkers): TUniStringArray;
+function Split(s: UniString; sep: WideChar): TUniStringArray;
 
-function FieldNameFromDefinition(s: WideString): WideString; 
+function FieldNameFromDefinition(s: UniString): UniString;
 
 implementation
 
@@ -125,7 +131,7 @@ begin
 end;
 
 //Returns a string consisting of [pc, pe). Not including pe.
-function SubStr(pc, pe: PWideChar): WideString;
+function SubStr(pc, pe: PWideChar): UniString;
 begin
   SetLength(Result, (integer(pe)-integer(pc)) div SizeOf(WideChar));
   Move(pc^, Result[1], (integer(pe)-integer(pc))); //size in bytes
@@ -148,7 +154,7 @@ end;
 //Scans string S for meta Meta (/**Meta* content */) and returns it's content.
 //Returns false if no meta was found.
 //Metas are a private way of storing information in comments.
-function GetMeta(s: Widestring; meta: WideString; out content: WideString): boolean;
+function GetMeta(s: UniString; meta: UniString; out content: UniString): boolean;
 var pc, pe: PWideChar;
 begin
   pc := WStrPos(@s[1], PWideChar('/**'+meta+'*'));
@@ -158,7 +164,7 @@ begin
   end;
 
   Inc(pc, 4+Length(meta));
-  pe := WStrPos(pc, PWideChar(WideString('*/')));
+  pe := WStrPos(pc, PWideChar(UniString('*/')));
   if pe=nil then begin //unterminated comment - very strange
     Result := false;
     exit;
@@ -169,7 +175,7 @@ begin
 end;
 
 //Checks if the specified meta is present in the string
-function MetaPresent(s, meta: WideString): boolean;
+function MetaPresent(s, meta: UniString): boolean;
 begin
   Result := (WStrPos(@s[1], PWideChar('/**'+meta+'*')) <> nil);
 end;
@@ -276,7 +282,7 @@ end;
 //Removes all the parts of the text between Op-Ed markers, except those in IgnoreBlocks.
 //Usually you want to pass all the non-nesting block types in IgnoreBlocks.
 //Flags govern if the OP/ED markers themselves will be stripped or preserved.
-function RemoveParts(s: WideString; mk: TMarker; IgnoreBlocks: TMarkers): string;
+function RemoveParts(s: UniString; mk: TMarker; IgnoreBlocks: TMarkers): string;
 var ps, pc, pe: PWideChar;
   ctype: integer;
 
@@ -351,7 +357,7 @@ begin
 end;
 
 //Removes all supported comments, linefeeds.
-function RemoveCommentsI(s: WideString; m: TMarkers): WideString;
+function RemoveCommentsI(s: UniString; m: TMarkers): UniString;
 var i: integer;
  im: TMarkers;
 begin
@@ -363,13 +369,13 @@ begin
   Result := RemoveParts(s, EndLineMarker, im);
 end;
 
-function RemoveComments(s: WideString): WideString;
+function RemoveComments(s: UniString): UniString;
 begin
   Result := RemoveCommentsI(s, CommentMarkers);
 end;
 
 
-function CommentTypeOpener(cType: integer): WideString;
+function CommentTypeOpener(cType: integer): UniString;
 begin
   if (cType>=0) and (cType<Length(CommentMarkers)-1) then
     Result := CommentMarkers[cType].s
@@ -377,7 +383,7 @@ begin
     Result := '';
 end;
 
-function CommentTypeCloser(cType: integer): WideString;
+function CommentTypeCloser(cType: integer): UniString;
 begin
   if (cType>=0) and (cType<=Length(CommentMarkers)-1) then
     Result := CommentMarkers[cType].e
@@ -501,8 +507,8 @@ end;
 //in matching but included in results)
 //  m: Ignore markers
 
-function MatchI(s: WideString; parts: array of WideString; m: TMarkers): TWideStringArray;
-var us: WideString;
+function MatchI(s: UniString; parts: array of UniString; m: TMarkers): TUniStringArray;
+var us: UniString;
   ps, pc: PWideChar;
   ups, upc: PWideChar;
   i: integer;
@@ -546,13 +552,13 @@ begin
   Result[Length(Result)-1] := Trim(SubStr(ps, WStrEnd(ps)));
 end;
 
-function Match(s: WideString; parts: array of WideString): TWideStringArray;
+function Match(s: UniString; parts: array of UniString): TUniStringArray;
 begin
   Result := MatchI(s, parts, NoEndCommandMarkers);
 end;
 
 //Deletes Jet identification brackets [] if they're present. (Also trims the string first)
-function CutIdBrackets(s: WideString): WideString;
+function CutIdBrackets(s: UniString): UniString;
 var ps, pe: PWideChar;
 begin
   if Length(s)=0 then begin
@@ -579,7 +585,7 @@ begin
 end;
 
 //Splits string by separator, trims parts. Comments are handled fine.
-function SplitI(s: WideString; sep: WideChar; m: TMarkers): TWideStringArray;
+function SplitI(s: UniString; sep: WideChar; m: TMarkers): TUniStringArray;
 var ps, pc: PWideChar;
 begin
   if Length(s)<=0 then begin
@@ -591,7 +597,7 @@ begin
   ps := @s[1];
   SetLength(Result, 0);
   repeat
-    pc := WStrPosIgnoreCommentsI(ps, PWideChar(Widestring(sep)), m);
+    pc := WStrPosIgnoreCommentsI(ps, PWideChar(UniString(sep)), m);
     SetLength(Result, Length(Result)+1);
     if pc=nil then begin
       Result[Length(Result)-1] := SubStr(ps, WStrEnd(ps));
@@ -603,7 +609,7 @@ begin
   until false;
 end;
 
-function Split(s: WideString; sep: WideChar): TWideStringArray;
+function Split(s: UniString; sep: WideChar): TUniStringArray;
 begin
   Result := SplitI(s, sep, NoEndCommandMarkers);
 end;
@@ -613,7 +619,7 @@ end;
 //field definition.
 //Allows spaces in field name, treats comments inside of brackets as normal symbols,
 //treats comments outside as separators.
-function FieldNameFromDefinition(s: WideString): WideString;
+function FieldNameFromDefinition(s: UniString): UniString;
 var pc: PWideChar;
   InBrackets: boolean;
 begin
@@ -647,7 +653,7 @@ begin
   Result := Trim(s);
 end;
 
-function Marker(s, e: WideString; f: TMarkerFlags=[]): TMarker;
+function Marker(s, e: UniString; f: TMarkerFlags=[]): TMarker;
 begin
   Result.s := s;
   Result.e := e;
