@@ -130,6 +130,11 @@ begin
   err('  --no-comments, --comments :: how comments are dumped depends on if private extensions are enabled');
   err('  --no-drop, --drop :: "DROP" tables etc before creating');
   err('');
+  err('With --tables and --views you can specify individual names:');
+  err('  --tables [tablename],[tablename]');
+  err('  --views [viewname],[viewname]');
+  err('Specify --case-sensitive-ids or --case-insensitive-ids if needed (default: sensitive).');
+  err('');
   err('Works both for dumping and executing:');
   err('  --no-private-extensions, --private-extensions :: disables dumping/parsing private extensions (check help)');
   err('');
@@ -172,9 +177,13 @@ var
   DatabasePassword: UniString;
   NewDb: boolean;
   ForceNewDb: boolean;
+ //Database options
+  CaseInsensitiveIDs: boolean;
  //Dump contents
   NeedDumpTables: boolean = true;
+  DumpTableList: TUniStringArray; //empty = all
   NeedDumpViews: boolean = true;
+  DumpViewList: TUniStringArray;
   NeedDumpProcedures: boolean = false;
   NeedDumpRelations: boolean = true;
   NeedDumpCheckConstraints: boolean = false;
@@ -194,7 +203,7 @@ var //Dynamic properties
 
 procedure ParseCommandLine;
 var i: integer;
-  s: UniString;
+  s, list: UniString;
   KeyboardInput: boolean;
 
   procedure Define(var Term: UniString; TermName: string; Value: UniString);
@@ -210,6 +219,22 @@ var i: integer;
     if i > ParamCount then
       BadUsage(Key+' requires specifying the '+param);
     Result := ParamStr(i);
+  end;
+
+  //Same as NextParam, but returns false if there's no param or next param is a flag
+  //Can return true and value=='' if there's an explicitly defined empty param (that's a feature)
+  function TryNextParam(key, param: UniString; out value: UniString): boolean;
+  begin
+    if i >= ParamCount then begin
+      Result := false;
+      exit;
+    end;
+    value := ParamStr(i+1);
+    Result := not value.StartsWith('-');
+    if Result then
+      Inc(i)
+    else
+      value := '';
   end;
 
 begin
@@ -257,15 +282,34 @@ begin
       ForceNewDb := true;
     end else
 
+   //Database options
+    if WideSameText(s, '--case-sensitive-ids') then begin
+      CaseInsensitiveIDs := false;
+    end else
+    if WideSameText(s, '--case-insensitive-ids') then begin
+      CaseInsensitiveIDs := true;
+    end else
+
    //What to dump
     if WideSameText(s, '--tables') then begin
       NeedDumpTables := true;
+      if TryNextParam('--tables', 'table list', list) then begin
+        DumpTableList := Split(list, ',');
+        if Length(DumpTableList) <= 0 then
+         //Empty DumpTableList internally means dump all, so just disable dump if asked for none
+          NeedDumpTables := false;
+      end;
     end else
     if WideSameText(s, '--no-tables') then begin
       NeedDumpTables := false;
     end else
     if WideSameText(s, '--views') then begin
       NeedDumpViews := true;
+      if TryNextParam('--views', 'view list', list) then begin
+        DumpViewList := Split(list, ',');
+        if Length(DumpViewList) <= 0 then
+          NeedDumpViews := false;
+      end;
     end else
     if WideSameText(s, '--no-views') then begin
       NeedDumpViews := false;
@@ -401,6 +445,12 @@ begin
 
   if DatabasePassword<>'' then
     ConnectionString := ConnectionString + 'Jet OLEDB:Database Password="'+DatabasePassword+'";';
+
+ //If asked for case-insensitive IDs, lowercase all relevant cached info
+  if CaseInsensitiveIDs then begin
+    DumpTableList := ToLowercase(DumpTableList);
+    DumpViewList := ToLowercase(DumpViewList);
+  end;
 
  //Resolve default values depending on a type of input stream.
  //If we fail to guess the type, default to File (this can always be overriden manually!)
@@ -1571,6 +1621,15 @@ begin
 end;
 *)
 
+//Lowercases a database ID only if IDs are configured as case-insensitive
+function LowercaseID(const AId: UniString): UniString;
+begin
+  if CaseInsensitiveIDs then
+    Result := ToLowercase(AId)
+  else
+    Result := AId;
+end;
+
 //Dumps table creation commands, then foreign keys and check constraints (if needed)
 procedure DumpTables(conn: _Connection);
 var rs: _Recordset;
@@ -1582,6 +1641,11 @@ begin
   while not rs.EOF do begin
     TableName := str(rs.Fields['TABLE_NAME'].Value);
     Description := str(rs.Fields['DESCRIPTION'].Value);
+
+    if (Length(DumpTableList) > 0) and not Contains(DumpTableList, LowercaseID(TableName)) then begin
+      rs.MoveNext;
+      continue;
+    end;
 
     if DropObjects then
       if PrivateExtensions then
@@ -1635,6 +1699,11 @@ begin
   while not rs.EOF do begin
     TableName := str(rs.Fields['TABLE_NAME'].Value);
     Description := str(rs.Fields['DESCRIPTION'].Value);
+
+    if (Length(DumpViewList) > 0) and not Contains(DumpViewList, LowercaseID(TableName)) then begin
+      rs.MoveNext;
+      continue;
+    end;
 
   (*
     –аньше использовалось CREATE VIEW, но хот€ суть та же,

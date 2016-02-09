@@ -100,6 +100,11 @@ function CutIdBrackets(s: UniString): UniString;
 function SplitI(s: UniString; sep: WideChar; m: TMarkers): TUniStringArray;
 function Split(s: UniString; sep: WideChar): TUniStringArray;
 
+function Contains(list: TUniStringArray; item: UniString): boolean;
+
+function ToLowercase(const s: UniString): UniString; overload;
+function ToLowercase(const list: TUniStringArray): TUniStringArray; overload;
+
 function FieldNameFromDefinition(s: UniString): UniString;
 
 implementation
@@ -612,6 +617,32 @@ end;
 function Split(s: UniString; sep: WideChar): TUniStringArray;
 begin
   Result := SplitI(s, sep, NoEndCommandMarkers);
+end;
+
+//True if list contains item (case-sensitive)
+function Contains(list: TUniStringArray; item: UniString): boolean;
+var i: integer;
+begin
+  Result := false;
+  for i := 0 to Length(list)-1 do
+    if list[i] = item then begin
+      Result := true;
+      break;
+    end;
+end;
+
+
+function ToLowercase(const s: UniString): UniString;
+begin
+  Result := s.ToLower;
+end;
+
+function ToLowercase(const list: TUniStringArray): TUniStringArray; overload;
+var i: integer;
+begin
+  SetLength(Result, Length(list));
+  for i := 0 to Length(list)-1 do
+    Result[i] := list[i].ToLower;
 end;
 
 
