@@ -1875,52 +1875,54 @@ begin
       readln(read_buf);
 
    //Parse
-    pc := @read_buf[1];
-    while pc^ <> #00 do begin
-     //Comment closers
-      if (pc^='}') and (Comment=csBrace) then
-        Comment := csNone
-      else
-      if (pc^='/') and prevCharIs(@read_buf[1], pc, '*') and (Comment=csSlash) then
-        Comment := csNone
-      else
-      if (pc^='''') and (Comment=csQuote) then
-        Comment := csNone
-      else
-      if (pc^='`') and (Comment=csBacktick) then
-        Comment := csNone
-      else
-      if (pc^='"') and (Comment=csDoubleQuote) then
-        Comment := csNone
-      else
-     //Comment openers
-      if (pc^='{') and (Comment=csNone) then
-        Comment := csBrace
-      else
-      if (pc^='*') and prevCharIs(@read_buf[1], pc, '/') and (Comment=csNone) then
-        Comment := csSlash
-      else
-      if (pc^='-') and prevCharIs(@read_buf[1], pc, '-') and (Comment=csNone) then
-        Comment := csLine
-      else
-      if (pc^='''') and (Comment=csNone) then
-        Comment := csQuote
-      else
-      if (pc^='`') and (Comment=csNone) then
-        Comment := csBacktick
-      else
-      if (pc^='"') and (Comment=csNone) then
-        Comment := csDoubleQuote
-      else
-     //Command is over, return (save the rest of the line for later)
-      if (pc^=';') and (Comment=csNone) then begin
-        appendStr(pc, -1);
-        restartStr(pc, +2);
-        Result := true;
-        break;
+    if read_buf<>'' then begin //could've read another empty string
+      pc := @read_buf[1];
+      while pc^ <> #00 do begin
+       //Comment closers
+        if (pc^='}') and (Comment=csBrace) then
+          Comment := csNone
+        else
+        if (pc^='/') and prevCharIs(@read_buf[1], pc, '*') and (Comment=csSlash) then
+          Comment := csNone
+        else
+        if (pc^='''') and (Comment=csQuote) then
+          Comment := csNone
+        else
+        if (pc^='`') and (Comment=csBacktick) then
+          Comment := csNone
+        else
+        if (pc^='"') and (Comment=csDoubleQuote) then
+          Comment := csNone
+        else
+       //Comment openers
+        if (pc^='{') and (Comment=csNone) then
+          Comment := csBrace
+        else
+        if (pc^='*') and prevCharIs(@read_buf[1], pc, '/') and (Comment=csNone) then
+          Comment := csSlash
+        else
+        if (pc^='-') and prevCharIs(@read_buf[1], pc, '-') and (Comment=csNone) then
+          Comment := csLine
+        else
+        if (pc^='''') and (Comment=csNone) then
+          Comment := csQuote
+        else
+        if (pc^='`') and (Comment=csNone) then
+          Comment := csBacktick
+        else
+        if (pc^='"') and (Comment=csNone) then
+          Comment := csDoubleQuote
+        else
+       //Command is over, return (save the rest of the line for later)
+        if (pc^=';') and (Comment=csNone) then begin
+          appendStr(pc, -1);
+          restartStr(pc, +2);
+          Result := true;
+          break;
+        end;
+        Inc(pc);
       end;
-      Inc(pc);
-    end;
+    end; //if read_buf <> ''
 
    //No ';' in this line => append the bufer and zero it
     if not Result then begin
