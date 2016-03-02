@@ -75,6 +75,7 @@ uses
 type
   PWideCharArray = ^TWideCharArray;
   TWideCharArray = array[0..16383] of WideChar;
+  OemString = type AnsiString(CP_OEMCP);
 
 //Writes a string to error output.
 //All errors, usage info, hints go here. Redirect it somewhere if you don't need it.
@@ -2036,7 +2037,7 @@ begin
       end;
 
       if (Errors=emIgnore) and (LoggingMode<>lmSilent) then
-        err(E.Classname + ': ' + string(WinToOem(AnsiString(E.Message))) + '(0x' + IntToHex(E.ErrorCode, 8) + ')');
+        err(E.Classname + ': ' + E.Message + '(0x' + IntToHex(E.ErrorCode, 8) + ')');
       if Errors<>emIgnore then
         raise; //Re-raise it to be caught in Main()
       exit; //else just exit
@@ -2126,6 +2127,7 @@ begin
 end;
 
 
+
 begin
   try
     CoInitializeEx(nil, COINIT_MULTITHREADED);
@@ -2176,7 +2178,7 @@ begin
       ExitCode := 2;
     end;
     on E:EOleException do begin
-      err(E.Classname + ': ' + string(WinToOem(AnsiString(E.Message))) + '(0x' + IntToHex(E.ErrorCode, 8) + ')');
+      err(E.Classname + ': ' + E.Message + '(0x' + IntToHex(E.ErrorCode, 8) + ')');
       ExitCode := 3;
     end;
     on E:Exception do begin
