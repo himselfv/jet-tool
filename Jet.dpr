@@ -130,6 +130,7 @@ begin
   err('  --no-procedures, --procedures');
   err('  --no-comments, --comments :: how comments are dumped depends on if private extensions are enabled');
   err('  --no-drop, --drop :: "DROP" tables etc before creating');
+  err('  --enable-if-exists, --disable-if-exists :: enables IF EXISTS option for DROP commands (not supported by Jet)');
   err('');
   err('With --tables and --views you can specify individual names:');
   err('  --tables [tablename],[tablename]');
@@ -180,6 +181,7 @@ var
   ForceNewDb: boolean;
  //Database options
   CaseInsensitiveIDs: boolean;
+  Supports_IfExists: boolean; //database supports IF EXISTS syntax
  //Dump contents
   NeedDumpTables: boolean = true;
   DumpTableList: TUniStringArray; //empty = all
@@ -352,6 +354,12 @@ begin
     end else
     if WideSameText(s, '--no-drop') then begin
       DropObjects := false;
+    end else
+    if WideSameText(s, '--enable-if-exists') then begin
+      Supports_IfExists := true;
+    end else
+    if WideSameText(s, '--disable-if-exists') then begin
+      Supports_IfExists := false;
     end else
 
     if WideSameText(s, '--silent') then begin
@@ -1631,6 +1639,17 @@ begin
     Result := AId;
 end;
 
+function GetDropCmdSql(const AType, ATableName: string): string;
+begin
+  Result := 'DROP '+AType;
+  if Supports_IfExists then
+    Result := Result + ' IF EXISTS';
+  Result := Result + ' ['+ATableName+']';
+  if PrivateExtensions then
+    Result := Result + ' /**WEAK**/';
+  Result := Result + ';';
+end;
+
 //Dumps table creation commands, then foreign keys and check constraints (if needed)
 procedure DumpTables(conn: _Connection);
 var rs: _Recordset;
@@ -1649,10 +1668,7 @@ begin
     end;
 
     if DropObjects then
-      if PrivateExtensions then
-        writeln('DROP TABLE ['+TableName+'] /**WEAK**/;')
-      else
-        writeln('DROP TABLE ['+TableName+'];');
+      writeln(GetDropCmdSql('TABLE', TableName));
     writeln('CREATE TABLE ['+TableName+'] (');
     writeln(GetTableText(conn, TableName));
     if HandleComments and (Description<>'') then
@@ -1712,10 +1728,7 @@ begin
     (даже если в базе они объ€влены, как VIEW).
   *)
     if DropObjects then
-      if PrivateExtensions then
-        writeln('DROP PROCEDURE ['+TableName+'] /**WEAK**/;')
-      else
-        writeln('DROP PROCEDURE ['+TableName+'];');
+      writeln(GetDropCmdSql('PROCEDURE', TableName));
     writeln('CREATE PROCEDURE ['+TableName+'] AS');
 
    //Access seems to keep it's own ';' at the end of DEFINITION
@@ -1750,10 +1763,7 @@ begin
     Description := str(rs.Fields['DESCRIPTION'].Value);
 
     if DropObjects then
-      if PrivateExtensions then
-        writeln('DROP PROCEDURE ['+ProcedureName+'] /**WEAK**/;')
-      else
-        writeln('DROP PROCEDURE ['+ProcedureName+'];');
+      writeln(GetDropCmdSql('PROCEDURE', ProcedureName));
     writeln('CREATE PROCEDURE ['+ProcedureName+'] AS');
 
    //Access seems to keep it's own ';' at the end of DEFINITION
