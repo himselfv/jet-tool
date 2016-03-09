@@ -319,6 +319,7 @@ var ps, pc, pe: PWideChar;
 
 begin
   Result := '';
+  if s = '' then exit;
 
   ps := @s[1];
   ctype := WStrPosOrCommentI(ps, PWideChar(mk.s), IgnoreBlocks, pc);
