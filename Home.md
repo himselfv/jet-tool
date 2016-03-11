@@ -44,9 +44,18 @@ What to include in dumps:
   * `--tables` (or `--no-tables` to disable, same with the rest of dump options)
   * `--views`
   * `--procedures`
+  * `--relations` (cross-table links, with or without constraints)
+  * `--data`
+  * `--query "SQL Query" TableName` (same as `--data`, but records come from the query)
+
+Limit dump to only selected tables: `--data table1,table2` (`--no-tables table1` not allowed).
+
+Shortcuts: `--all`, `--none`; may be overriden: `--all --no-procedures`
+
+Additional options:
+
   * `--comments` :: dump comments or ignore them
 
-About comments.
 By default, Jet gives no way to set table/field comments ("descriptions" you write for them in MS Access) via SQL. They can be read though. If you enable this, they will be dumped in SQL file, but how they'll be dumped, that depends.
 
 By default they're dumped just as comments, which means, when you execute the resulting SQL they will be ignored. With `--private-extensions` on, they're dumped in a private comment format:
@@ -61,10 +70,11 @@ Back to dumping options:
   * `--private-extensions` (or `--no-private-extensions`) :: enables/disabled the private comment generation (with `dump`) or parsing (with `exec`)
   * `--drop` :: adds "`DROP TABLE [tablename]`" and "`DROP VIEW [tablename]`" commands before "`CREATE TABLE/VIEW`".
 With `--private-extensions` on, these are marked as `/**WEAK**/`, which means errors on these commands will be ignored even in `--stop-on-errors` mode.
+  * `--enable-if-exists` :: adds `IF EXISTS` to `DROP` commands. Jet does not support this, so only when exporting to other engines.
 
-Default dump configuration:
+If you specify none of the above options, default dump takes place:
 
-  `--tables --views --comments --drop --private-extensions`
+  `--tables --views --comments --relations --procedures --drop --private-extensions`
 
 Logging options:
 
