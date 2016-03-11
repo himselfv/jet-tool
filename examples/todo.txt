@@ -1,0 +1,4 @@
+Constraints (relations):
+  ALTER TABLE [Counters] ADD CONSTRAINT [CounterTypesCounters] FOREIGN KEY (CounterType) REFERENCES [CounterTypes] (ItemID) ON UPDATE CASCADE;
+  ALTER TABLE [Counters] ADD CONSTRAINT [mcd_#IMachinesmcd_#ICounters] FOREIGN KEY (MachineID) REFERENCES [Machines] (ItemID) ON UPDATE CASCADE ON DELETE CASCADE;
+

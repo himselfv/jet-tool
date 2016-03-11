@@ -21,6 +21,9 @@ uses
   AdoxDumper in 'AdoxDumper.pas',
   JetDataFormats in 'JetDataFormats.pas';
 
+//{$DEFINE DUMP_CHECK_CONSTRAINTS}
+//Feature under development.
+
 (*
   Supported propietary extension comments:
     /**COMMENT* [comment text] */  - table, field or view comment
@@ -55,11 +58,12 @@ uses
       Standard markers [unique, disallow null, ignore null, primary key]
     Foreign keys
     Views
+    Procedures
+    Data from tables and queries
 
   What can be added in the future:
     Check constraints
     Rest of the "table constraints"
-    Stored procedures
 
   A note about constraints. There are:
     Check constraints :: added through SQL, unrelated to anything else
@@ -110,7 +114,7 @@ begin
   err('');
   err('Commands:');
   err('  jet touch :: connect to database and quit');
-  err('  jet dump :: dump sql schema');
+  err('  jet dump :: dump sql schema / data');
   err('  jet exec :: parse sql from input');
   err('  jet schema :: output internal jet schema reports');
   err('  jet daoschema :: output DAO schema report');
@@ -136,13 +140,21 @@ begin
   err('These are only applied after the command-line parsing is over');
   err('');
   err('What to include and whatnot for dumping:');
-  err('  --no-tables, --tables');
-  err('  --no-views, --views');
-  err('  --no-procedures, --procedures');
-  err('  --no-comments, --comments :: how comments are dumped depends on if private extensions are enabled');
-  err('  --no-drop, --drop :: "DROP" tables etc before creating');
+  err('  --tables, --no-tables');
+  err('  --views, --no-views');
+  err('  --procedures, --no-procedures');
+  err('  --relations, --no-relations');
+ {$IFDEF DUMP_CHECK_CONSTRAINTS}
+  err('  --check-constraints, --no-check-constraints');
+ {$ENDIF}
+  err('  --data, --no-data');
+  err('  --query "SQL QUERY" TableName :: data from this SQL query (each subsequent usage adds a query to the list)');
+  err('If none of these are explicitly given, the default set MAY be used. If any is given, only that is exported.');
+  err('Shortcuts: --all, --none');
+  err('');
+  err('  --comments, --no-comments :: how comments are dumped depends on if private extensions are enabled');
+  err('  --drop, --no-drop :: DROP tables etc before creating');
   err('  --enable-if-exists, --disable-if-exists :: enables IF EXISTS option for DROP commands (not supported by Jet)');
-  err('  --no-data, --data');
   err('');
   err('With --tables, --views and --data you can specify individual names:');
   err('  --tables [tablename],[tablename]');
@@ -151,7 +163,7 @@ begin
   err('Specify --case-sensitive-ids or --case-insensitive-ids if needed (default: sensitive).');
   err('');
   err('Works both for dumping and executing:');
-  err('  --no-private-extensions, --private-extensions :: disables dumping/parsing private extensions (check help)');
+  err('  --no-private-extensions, --private-extensions :: disables dumping/parsing private extensions (see help)');
   err('');
   err('What to do with errors when executing:');
   err('  --silent :: do not print anything (at all)');
@@ -196,15 +208,22 @@ var
   CaseInsensitiveIDs: boolean;
   Supports_IfExists: boolean; //database supports IF EXISTS syntax
  //Dump contents
-  NeedDumpTables: boolean = true;
+  DumpDefaultSourceSet: boolean = true; //cleared if the user has explicitly said what to dump
+  NeedDumpTables: boolean = false;
   DumpTableList: TUniStringArray; //empty = all
-  NeedDumpViews: boolean = true;
+  NeedDumpViews: boolean = false;
   DumpViewList: TUniStringArray;
   NeedDumpProcedures: boolean = false;
-  NeedDumpRelations: boolean = true;
+  NeedDumpRelations: boolean = false;
+ {$IFDEF DUMP_CHECK_CONSTRAINTS}
   NeedDumpCheckConstraints: boolean = false;
+ {$ENDIF}
   NeedDumpData: boolean = false;
   DumpDataList: TUniStringArray; //empty = use DumpTableList
+  DumpQueryList: array of record
+    Query: string;
+    TableName: string;
+  end;
  //Dump options
   HandleComments: boolean = true;
   PrivateExtensions: boolean = true;
@@ -218,6 +237,52 @@ var
 
 var //Dynamic properties
   CanUseDao: boolean; //sometimes there are other ways
+
+procedure ConfigureDumpAllSources;
+begin
+  NeedDumpTables := true;
+  SetLength(DumpTableList, 0);
+  NeedDumpViews := true;
+  SetLength(DumpViewList, 0);
+  NeedDumpProcedures := true;
+  NeedDumpRelations := true;
+ {$IFDEF DUMP_CHECK_CONSTRAINTS}
+  NeedDumpCheckConstraints := true;
+ {$ENDIF}
+  NeedDumpData := true;
+  SetLength(DumpDataList, 0);
+end;
+
+procedure ConfigureDumpNoSources;
+begin
+  NeedDumpTables := false;
+  SetLength(DumpTableList, 0);
+  NeedDumpViews := false;
+  SetLength(DumpViewList, 0);
+  NeedDumpProcedures := false;
+  NeedDumpRelations := false;
+ {$IFDEF DUMP_CHECK_CONSTRAINTS}
+  NeedDumpCheckConstraints := false;
+ {$ENDIF}
+  NeedDumpData := false;
+  SetLength(DumpDataList, 0);
+end;
+
+procedure ConfigureDumpDefaultSources;
+begin
+  NeedDumpTables := true;
+  SetLength(DumpTableList, 0);
+  NeedDumpViews := true;
+  SetLength(DumpViewList, 0);
+  NeedDumpProcedures := true;
+  NeedDumpRelations := true;
+ {$IFDEF DUMP_CHECK_CONSTRAINTS}
+  NeedDumpCheckConstraints := true;
+ {$ENDIF}
+  NeedDumpData := false;
+  SetLength(DumpDataList, 0);
+end;
+
 
 procedure ParseCommandLine;
 var i: integer;
@@ -310,6 +375,7 @@ begin
 
    //What to dump
     if WideSameText(s, '--tables') then begin
+      DumpDefaultSourceSet := false; //override default
       NeedDumpTables := true;
       if TryNextParam('--tables', 'table list', list) then begin
         DumpTableList := Split(list, ',');
@@ -319,9 +385,11 @@ begin
       end;
     end else
     if WideSameText(s, '--no-tables') then begin
+      DumpDefaultSourceSet := false;
       NeedDumpTables := false;
     end else
     if WideSameText(s, '--views') then begin
+      DumpDefaultSourceSet := false; //override default
       NeedDumpViews := true;
       if TryNextParam('--views', 'view list', list) then begin
         DumpViewList := Split(list, ',');
@@ -330,27 +398,37 @@ begin
       end;
     end else
     if WideSameText(s, '--no-views') then begin
+      DumpDefaultSourceSet := false;
       NeedDumpViews := false;
     end else
     if WideSameText(s, '--procedures') then begin
+      DumpDefaultSourceSet := false; //override default
       NeedDumpProcedures := true;
     end else
     if WideSameText(s, '--no-procedures') then begin
+      DumpDefaultSourceSet := false;
       NeedDumpProcedures := false;
     end else
     if WideSameText(s, '--relations') then begin
+      DumpDefaultSourceSet := false; //override default
       NeedDumpRelations := true;
     end else
     if WideSameText(s, '--no-relations') then begin
+      DumpDefaultSourceSet := false;
       NeedDumpRelations := false;
     end else
+   {$IFDEF DUMP_CHECK_CONSTRAINTS}
     if WideSameText(s, '--check-constraints') then begin
+      DumpDefaultSourceSet := false; //override default
       NeedDumpCheckConstraints := true;
     end else
     if WideSameText(s, '--no-check-constraints') then begin
+      DumpDefaultSourceSet := false;
       NeedDumpCheckConstraints := false;
     end else
+   {$ENDIF}
     if WideSameText(s, '--data') then begin
+      DumpDefaultSourceSet := false;
       NeedDumpData := true;
       if TryNextParam('--data', 'table list', list) then begin
         DumpDataList := Split(list, ',');
@@ -360,7 +438,25 @@ begin
       end;
     end else
     if WideSameText(s, '--no-data') then begin
+      DumpDefaultSourceSet := false;
       NeedDumpData := false;
+    end else
+    if WideSameText(s, '--query') then begin
+      DumpDefaultSourceSet := false;
+      SetLength(DumpQueryList, Length(DumpQueryList)+1);
+      DumpQueryList[Length(DumpQueryList)-1].Query := NextParam('--query', 'SQL query text');
+      DumpQueryList[Length(DumpQueryList)-1].TableName := NextParam('--query', 'Table name');
+    end else
+
+   //Shortcuts
+   //Use to explicitly set the playing field before modifying
+    if WideSameText(s, '--all') then begin
+      DumpDefaultSourceSet := false;
+      ConfigureDumpAllSources();
+    end else
+    if WideSameText(s, '--none') then begin
+      DumpDefaultSourceSet := false;
+      ConfigureDumpNoSources();
     end else
 
    //Dump options
@@ -481,6 +577,10 @@ begin
 
   if DatabasePassword<>'' then
     ConnectionString := ConnectionString + 'Jet OLEDB:Database Password="'+DatabasePassword+'";';
+
+ //If no modifications have been made, dump default set of stuff
+  if DumpDefaultSourceSet then
+    ConfigureDumpDefaultSources;
 
  //If asked for case-insensitive IDs, lowercase all relevant cached info
   if CaseInsensitiveIDs then begin
@@ -1350,7 +1450,7 @@ begin
     writeln('');
 end;
 
-(*
+{$IFDEF DUMP_CHECK_CONSTRAINTS}
 //Dumps check constraint creation commands for a given table
 procedure DumpCheckConstraint(conn: _Connection; TableName: UniString);
 var rs: _Recordset;
@@ -1433,7 +1533,7 @@ begin
   if Length(ForKeys.data)>0 then
     writeln('');
 end;
-*)
+{$ENDIF}
 
 //Lowercases a database ID only if IDs are configured as case-insensitive
 function LowercaseID(const AId: UniString): UniString;
@@ -1498,8 +1598,8 @@ begin
     end;
   end;
 
- //TODO: One more time, with check constraints
- (*
+ {$IFDEF DUMP_CHECK_CONSTRAINTS}
+ //One more time, with check constraints
   if NeedDumpCheckConstraints and not rs.BOF then begin
     rs.MoveFirst();
     while not rs.EOF do begin
@@ -1508,7 +1608,7 @@ begin
       rs.MoveNext();
     end;
   end;
- *)
+ {$ENDIF}
 end;
 
 procedure DumpViews(conn: _Connection);
@@ -1591,7 +1691,7 @@ begin
 end;
 
 
-//Generates record insertion commands for the records in a recordset.
+//Dumps INSERT commands for the records in a recordset.
 //  TableName: table to insert records into
 procedure DumpInsertCommands(const TableName: string; const rs: _Recordset);
 var pref, vals: string;
@@ -1621,6 +1721,7 @@ begin
   end;
 end;
 
+//Dumps table contents as INSERT commands for all selected tables
 procedure DumpData(conn: _Connection);
 var rs: _Recordset;
   TableName: UniString;
@@ -1646,6 +1747,16 @@ begin
   end;
 end;
 
+
+procedure DumpQueries(conn: _Connection);
+var RecordsAffected: OleVariant;
+  i: integer;
+begin
+  for i := 0 to Length(DumpQueryList)-1 do begin
+    writeln('/* "'+EncodeComment(DumpQueryList[i].Query)+'" */');
+    DumpInsertCommands(DumpQueryList[i].TableName, conn.Execute(DumpQueryList[i].Query, RecordsAffected, 0));
+  end;
+end;
 
 
 procedure DumpSql();
@@ -1676,6 +1787,12 @@ begin
   if NeedDumpData then begin
     writeln('/* Table data */');
     DumpData(conn);
+  end;
+
+ //Additional queries
+  if Length(DumpQueryList) > 0 then begin
+    writeln('/* Additional queries */');
+    DumpQueries(conn);
   end;
 
   writeln('/* Access SQL export data end. */');
