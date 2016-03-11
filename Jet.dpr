@@ -3,12 +3,23 @@ program Jet;
 {$APPTYPE CONSOLE}
 
 uses
-  SysUtils, Windows, ActiveX, Variants, AdoDb, OleDb, AdoInt, ComObj, UniStrUtils,
-  DAO_TLB, ADOX_TLB, StreamUtils,
+  SysUtils,
+  Windows,
+  ActiveX,
+  Variants,
+  AdoDb,
+  OleDb,
+  AdoInt,
+  ComObj,
+  UniStrUtils,
+  DAO_TLB,
+  ADOX_TLB,
+  StreamUtils,
   StringUtils in 'StringUtils.pas',
   DaoDumper in 'DaoDumper.pas',
   JetCommon in 'JetCommon.pas',
-  AdoxDumper in 'AdoxDumper.pas';
+  AdoxDumper in 'AdoxDumper.pas',
+  JetDataFormats in 'JetDataFormats.pas';
 
 (*
   Supported propietary extension comments:
@@ -131,10 +142,12 @@ begin
   err('  --no-comments, --comments :: how comments are dumped depends on if private extensions are enabled');
   err('  --no-drop, --drop :: "DROP" tables etc before creating');
   err('  --enable-if-exists, --disable-if-exists :: enables IF EXISTS option for DROP commands (not supported by Jet)');
+  err('  --no-data, --data');
   err('');
-  err('With --tables and --views you can specify individual names:');
+  err('With --tables, --views and --data you can specify individual names:');
   err('  --tables [tablename],[tablename]');
   err('  --views [viewname],[viewname]');
+  err('  --data [tablename],[tablename] :: defaults to same as --tables');
   err('Specify --case-sensitive-ids or --case-insensitive-ids if needed (default: sensitive).');
   err('');
   err('Works both for dumping and executing:');
@@ -190,6 +203,8 @@ var
   NeedDumpProcedures: boolean = false;
   NeedDumpRelations: boolean = true;
   NeedDumpCheckConstraints: boolean = false;
+  NeedDumpData: boolean = false;
+  DumpDataList: TUniStringArray; //empty = use DumpTableList
  //Dump options
   HandleComments: boolean = true;
   PrivateExtensions: boolean = true;
@@ -334,6 +349,18 @@ begin
     end else
     if WideSameText(s, '--no-check-constraints') then begin
       NeedDumpCheckConstraints := false;
+    end else
+    if WideSameText(s, '--data') then begin
+      NeedDumpData := true;
+      if TryNextParam('--data', 'table list', list) then begin
+        DumpDataList := Split(list, ',');
+        if Length(DumpDataList) <= 0 then
+         //Empty DumpDataList internally means dump all, so just disable dump if asked for none
+          NeedDumpData := false;
+      end;
+    end else
+    if WideSameText(s, '--no-data') then begin
+      NeedDumpData := false;
     end else
 
    //Dump options
@@ -712,228 +739,6 @@ begin
     err('Warning: '+msg);
 end;
 
-{$REGION 'Encoding'}
-var
-  FJetFormatSettings: TFormatSettings;
-  FJetFormatSettingsInitialized: boolean = false;
-
-function JetFormatSettings: TFormatSettings;
-begin
-  if not FJetFormatSettingsInitialized then begin
-    FJetFormatSettings := TFormatSettings.Create();
-    with FJetFormatSettings do begin
-      DecimalSeparator := '.';
-      DateSeparator := '-';
-      TimeSeparator := ':';
-      ShortDateFormat := 'mm-dd-yyyy hh:nn:ss';
-      LongDateFormat := 'mm-dd-yyyy hh:nn:ss';
-    end;
-    FJetFormatSettingsInitialized := true;
-  end;
-  Result := FJetFormatSettings;
-end;
-
-//Encodes binary data for inserting to SQL text.
-//Presently unused (DEFAULT values are already escaped in the DB)
-function EncodeBin(data: array of byte): WideString;
-const HexChars:WideString='0123456789ABCDEF';
-var i: integer;
-begin
-  if Length(data)<=0 then begin
-    Result := 'NULL';
-    exit;
-  end;
-
-  Result := '0x';
-  SetLength(Result, 2+Length(data)*2);
-  for i := 0 to Length(data) - 1 do begin
-    Result[2+i*2+0] := HexChars[1+(data[i] shr 4)];
-    Result[2+i*2+1] := HexChars[1+(data[i] and $0F)];
-  end;
-end;
-
-function EncodeOleBin(data: OleVariant): WideString;
-var bin_data: array of byte;
-begin
-  if VarIsNil(data) then
-    Result := NULL
-  else begin
-    bin_data := data;
-    Result := EncodeBin(bin_data);
-  end;
-end;
-
-//Encodes /**/ comment for inserting into SQL text. Escapes closure symbols.
-//Replacements:
-//  \ == \\
-//  / == \/
-//It's handy that you don't need a special parsing when looking for comment's end:
-//dangerous combinations just get broken during the encoding.
-function EncodeComment(str: WideString): WideString;
-var pc: PWideChar;
-  i: integer;
-  c: WideChar;
-begin
- //We'll never need more than twice the size
-  SetLength(Result, 2*Length(str));
-  pc := @Result[1];
-
-  for i := 1 to Length(str) do begin
-    c := str[i];
-    if (c='\') or (c='/') then begin
-      pc^ := '\';
-      Inc(pc);
-      pc^ := c;
-    end else
-    begin
-      pc^ := c;
-    end;
-    Inc(pc);
-  end;
-
- //Actual length
-  SetLength(Result, (integer(pc)-integer(@Result[1])) div 2);
-end;
-
-//Decodes comment.
-function DecodeComment(str: WideString): WideString;
-var pc: PWideChar;
-  i: integer;
-  c: WideChar;
-  SpecSymbol: boolean;
-begin
- //We'll never need more than the source size
-  SetLength(Result, Length(str));
-  pc := @Result[1];
-
-  SpecSymbol := false;
-  for i := 1 to Length(str) do begin
-    c := str[i];
-    if (not SpecSymbol) and (c='\') then begin
-      SpecSymbol := true;
-      continue;
-    end;
-    SpecSymbol := false;
-    pc^ := c;
-    Inc(pc);
-  end;
-
- //Actual length
-  SetLength(Result, (integer(pc)-integer(@Result[1])) div 2);
-end;
-
-//Encodes a string for inserting into SQL text, replaces specsymbols.
-//Presently unused (DEFAULT values are already escaped in the DB)
-function EncodeStr(val: WideString): WideString;
-var pc: PWideChar;
-  i: integer;
-  c: WideChar;
-begin
- //We'll never need more than twice the size
-  SetLength(Result, 2*Length(val));
-  pc := @Result[1];
-
-  for i := 1 to Length(val) do begin
-    c := val[i];
-    if c=#00 then begin  //nul
-      pc^ := '\';
-      Inc(pc);
-      pc^ := '0';
-    end else
-    if c=#08 then begin  //backspace
-      pc^ := '\';
-      Inc(pc);
-      pc^ := 'b';
-    end else
-    if c=#09 then begin  //tab
-      pc^ := '\';
-      Inc(pc);
-      pc^ := 't';
-    end else
-    if (c='''') or (c='"') or (c='\') then begin
-      pc^ := '\';
-      Inc(pc);
-      pc^ := c;
-    end else
-    begin
-      pc^ := c;
-    end;
-    Inc(pc);
-  end;
-
- //Actual length
-  SetLength(Result, (integer(pc)-integer(@Result[1])) div 2);
-end;
-
-//Because Delphi does not allow int64(Value).
-function uint_cast(Value: OleVariant): int64;
-begin
-  Result := value;
-end;
-
-//Formats a field value according to it's type
-//Presently unused (DEFAULT values are already escaped in the DB)
-function JetEncodeTypedValue(Value: OleVariant; DataType: integer): Widestring;
-begin
-  if VarIsNil(Value) then
-    Result := 'NULL'
-  else
-  case DataType of
-    DBTYPE_I1, DBTYPE_I2, DBTYPE_I4,
-    DBTYPE_UI1, DBTYPE_UI2, DBTYPE_UI4:
-      Result := IntToStr(integer(Value));
-    DBTYPE_I8, DBTYPE_UI8:
-      Result := IntToStr(uint_cast(Value));
-    DBTYPE_R4, DBTYPE_R8:
-      Result := FloatToStr(double(Value), JetFormatSettings);
-    DBTYPE_NUMERIC, DBTYPE_DECIMAL, DBTYPE_CY:
-      Result := FloatToStr(currency(Value), JetFormatSettings);
-    DBTYPE_GUID:
-     //Or else it's not GUID
-      Result := GuidToString(StringToGuid(Value));
-    DBTYPE_DATE:
-      Result := '#'+DatetimeToStr(Value, JetFormatSettings)+'#';
-    DBTYPE_BOOL:
-      Result := BoolToStr(Value, {UseBoolStrs=}true);
-    DBTYPE_BYTES:
-      Result := EncodeOleBin(Value);
-    DBTYPE_WSTR:
-      Result := ''''+EncodeStr(Value)+'''';
-  else
-    Result := ''''+EncodeStr(Value)+''''; //best guess
-  end;
-end;
-
-//Encodes a value according to it's variant type
-//Presently unused (DEFAULT values are already escaped in the DB)
-function JetEncodeValue(Value: OleVariant): WideString;
-begin
-  if VarIsNil(Value) then
-    Result := 'NULL'
-  else
-  case VarType(Value) of
-    varSmallInt, varInteger, varShortInt,
-    varByte, varWord, varLongWord:
-      Result := IntToStr(integer(Value));
-    varInt64:
-      Result := IntToStr(uint_cast(Value));
-    varSingle, varDouble:
-      Result := FloatToStr(double(Value), JetFormatSettings);
-    varCurrency:
-      Result := FloatToStr(currency(Value), JetFormatSettings);
-    varDate:
-      Result := '#'+DatetimeToStr(Value, JetFormatSettings)+'#';
-    varOleStr, varString:
-      Result := ''''+EncodeStr(Value)+'''';
-    varBoolean:
-      Result := BoolToStr(Value, {UseBoolStrs=}true);
-    varArray:
-      Result := EncodeOleBin(Value);
-  else
-    Result := ''''+EncodeStr(Value)+''''; //best guess
-  end;
-end;
-{$ENDREGION}
 
 {$REGION 'Columns'}
 type
@@ -1785,6 +1590,64 @@ begin
   end;
 end;
 
+
+//Generates record insertion commands for the records in a recordset.
+//  TableName: table to insert records into
+procedure DumpInsertCommands(const TableName: string; const rs: _Recordset);
+var pref, vals: string;
+  i: integer;
+begin
+ //Generate common insertion prefix. Unfortunately, Jet does not allow multi-record insertion, so
+ //we'll have to repeat it every time.
+  if rs.Fields.Count <= 0 then
+    pref := ''
+  else begin
+    pref := '[' + rs.Fields[0].Name + ']';
+    for i := 1 to rs.Fields.Count-1 do
+      pref := pref + ',['+rs.Fields[i].Name+']';
+  end;
+  pref := 'INSERT INTO ['+TableName+'] ('+pref+') VALUES ';
+
+  while not rs.EOF do begin
+    if rs.Fields.Count <= 0 then
+      vals := ''
+    else begin
+      vals := JetEncodeValue(rs.Fields[0].Value);
+      for i := 1 to rs.Fields.Count-1 do
+        vals := vals + ',' + JetEncodeValue(rs.Fields[i].Value);
+    end;
+    writeln(pref+'('+vals+');');
+    rs.MoveNext;
+  end;
+end;
+
+procedure DumpData(conn: _Connection);
+var rs: _Recordset;
+  TableName: UniString;
+  RecordsAffected: OleVariant;
+begin
+  if DumpDataList = nil then
+    DumpDataList := DumpTableList; //maybe also nil
+
+  rs := conn.OpenSchema(adSchemaTables,
+    VarArrayOf([Unassigned, Unassigned, Unassigned, 'TABLE']), EmptyParam);
+  while not rs.EOF do begin
+    TableName := str(rs.Fields['TABLE_NAME'].Value);
+    if (Length(DumpDataList) > 0) and not Contains(DumpDataList, LowercaseID(TableName)) then begin
+      rs.MoveNext;
+      continue;
+    end;
+
+    writeln('/* Data for table '+TableName+' */');
+    DumpInsertCommands(TableName, conn.Execute('SELECT * FROM ['+TableName+']', RecordsAffected, 0));
+
+    writeln('');
+    rs.MoveNext();
+  end;
+end;
+
+
+
 procedure DumpSql();
 var conn: _Connection;
 begin
@@ -1806,7 +1669,13 @@ begin
  //Procedures
   if NeedDumpProcedures then begin
     writeln('/* Procedures */');
-    DumpProcedures(conn); //not implemented yet
+    DumpProcedures(conn);
+  end;
+
+ //Data
+  if NeedDumpData then begin
+    writeln('/* Table data */');
+    DumpData(conn);
   end;
 
   writeln('/* Access SQL export data end. */');
