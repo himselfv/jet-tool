@@ -1,6 +1,6 @@
 /*
-Tests procedure creation and calls.
-This requires a fair amount of other functionality working, so run later in the tests.
+Tests procedure creation and calls. This requires a fair amount of other functionality working, so run later in the tests.
+Dump must much the procedures part.
 */
 
 CREATE TABLE [Users] (
