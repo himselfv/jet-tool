@@ -150,7 +150,7 @@ begin
   err('  --data, --no-data');
   err('  --query "SQL QUERY" TableName :: data from this SQL query (each subsequent usage adds a query to the list)');
   err('If none of these are explicitly given, the default set MAY be used. If any is given, only that is exported.');
-  err('Shortcuts: --all, --none');
+  err('Shortcuts: --all, --none, --default');
   err('');
   err('  --comments, --no-comments :: how comments are dumped depends on if private extensions are enabled');
   err('  --drop, --no-drop :: DROP tables etc before creating');
@@ -457,6 +457,10 @@ begin
     if WideSameText(s, '--none') then begin
       DumpDefaultSourceSet := false;
       ConfigureDumpNoSources();
+    end else
+    if WideSameText(s, '--default') then begin
+      DumpDefaultSourceSet := false;
+      ConfigureDumpDefaultSources(); //configure right now, so it can be overriden
     end else
 
    //Dump options
