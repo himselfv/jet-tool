@@ -76,5 +76,4 @@ CREATE TABLE [AccessAudit] (
 [Action] INTEGER
 );
 ALTER TABLE [AccessAudit] ADD CONSTRAINT [AccessAuditResourceID_References_Resource] FOREIGN KEY (ResourceID) REFERENCES [Resources] (ID) ON UPDATE CASCADE;
-
 ALTER TABLE [AccessAudit] ADD CONSTRAINT [AccessAuditPrincipalID_References_SecurityPrincipal] FOREIGN KEY (PrincipalID) REFERENCES [SecurityPrincipals] (ID) ON UPDATE CASCADE ON DELETE SET NULL;

@@ -18,7 +18,8 @@ type
     mfKeepOp,   //do not consider op/ed to be part of the contents
     mfKeepEd,   //for example, keep them when deleting comments
     mfNesting,  //allow nesting
-    mfEscaping  //ignore escaped EDs. Requires no nesting. 
+    mfEscaping, //ignore escaped EDs. Requires no nesting.
+    mfEOFEnds   //EOF is a legal terminator for this marker (usually the ones ending in CRLF)
   );
   TMarkerFlags = set of TMarkerFlag;
 
@@ -327,19 +328,22 @@ begin
     if ctype>=0 then begin
      //It's an IgnoreBlock    
       pe := WStrPosEnd(pc, IgnoreBlocks, IgnoreBlocks[ctype]);
-      if pe=nil then begin
+      if (pe=nil) and not (mfEOFEnds in IgnoreBlocks[ctype].f) then begin
         appendResult(ps, WStrEnd(ps));
         exit;
       end;
 
-     //Next part      
-      Inc(pe, Length(IgnoreBlocks[ctype].e)); //Disregard Flags.mfKeepEd because we copy the contents anyway
+     //Next part
+      if pe = nil then //ended with EOF
+        pe := StrEnd(pc)
+      else
+        Inc(pe, Length(IgnoreBlocks[ctype].e)); //Disregard Flags.mfKeepEd because we copy the contents anyway
       appendResult(ps, pe);
       ps := pe;
     end else begin
      //It's a DeleteBlock
       pe := WStrPosEnd(pc, IgnoreBlocks, mk);
-      if pe=nil then begin
+      if (pe=nil) and not (mfEOFEnds in mk.f) then begin
         appendResult(ps, WStrEnd(ps));
         exit;
       end;
@@ -350,9 +354,13 @@ begin
       appendResult(ps, pc);
 
      //Next part
-      ps := pe;
-      if not (mfKeepEd in mk.f) then
-        Inc(ps, Length(mk.e));
+      if pe = nil then //ended with EOF
+        ps := StrEnd(pc)
+      else begin
+        ps := pe;
+        if not (mfKeepEd in mk.f) then
+          Inc(ps, Length(mk.e));
+      end;
     end;
     ctype := WStrPosOrCommentI(ps, PWideChar(mk.s), IgnoreBlocks, pc);
   end;
@@ -704,7 +712,7 @@ initialization
   SetLength(CommentMarkers, 3);
   CommentMarkers[0] := Marker('{', '}' , [mfEscaping]);
   CommentMarkers[1] := Marker('/*', '*/', [mfEscaping]);
-  CommentMarkers[2] := Marker('--', #13#10, [mfKeepEd]);
+  CommentMarkers[2] := Marker('--', #13#10, [mfKeepEd, mfEOFEnds]);
 
   SetLength(StringLiteralMarkers, 2);
   StringLiteralMarkers[0] := Marker('''', '''', [mfEscaping]);
