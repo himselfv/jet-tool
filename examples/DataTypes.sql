@@ -76,12 +76,3 @@ CREATE TABLE [DataTypeTest_NotNull] (
 [T_TEXT_DYN] TEXT NOT NULL,
 [T_TEXT_L] LONGTEXT NOT NULL
 );
-
-
-/*
-Auto-increment fields, all possible types listed explicitly.
-*/
-CREATE TABLE [DataTypeTest_AutoInc] (
-[ID_I4] COUNTER NOT NULL,
-[ID_GUID] UNIQUEIDENTIFIER DEFAULT GenGUID()
-)
