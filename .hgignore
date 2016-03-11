@@ -16,3 +16,7 @@ __history
 *.zip
 *.rar
 *.cmd
+
+# Intermediate files
+examples/Databases/*
+examples/Dumps/*
