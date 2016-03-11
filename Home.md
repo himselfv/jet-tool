@@ -50,7 +50,7 @@ What to include in dumps:
 
 Limit dump to only selected tables: `--data table1,table2` (`--no-tables table1` not allowed).
 
-Shortcuts: `--all`, `--none`; may be overriden: `--all --no-procedures`
+Shortcuts: `--all`, `--none`, `--default`; may be overriden: `--all --no-procedures`
 
 Additional options:
 
