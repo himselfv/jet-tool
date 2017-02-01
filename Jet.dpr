@@ -1291,6 +1291,61 @@ begin
   end;
 end;
 
+//Lowercases a database ID only if IDs are configured as case-insensitive
+function LowercaseID(const AId: UniString): UniString;
+begin
+  if CaseInsensitiveIDs then
+    Result := ToLowercase(AId)
+  else
+    Result := AId;
+end;
+
+function GetDropCmdSql(const AType, ATableName: string): string;
+begin
+  Result := 'DROP '+AType;
+  if Supports_IfExists then
+    Result := Result + ' IF EXISTS';
+  Result := Result + ' ['+ATableName+']';
+  if PrivateExtensions then
+    Result := Result + ' /**WEAK**/';
+  Result := Result + ';';
+end;
+
+//Dumps table creation commands
+procedure DumpTables(conn: _Connection);
+var rs: _Recordset;
+  TableName: UniString;
+  Description: UniString;
+begin
+  rs := conn.OpenSchema(adSchemaTables,
+    VarArrayOf([Unassigned, Unassigned, Unassigned, 'TABLE']), EmptyParam);
+  while not rs.EOF do begin
+    TableName := str(rs.Fields['TABLE_NAME'].Value);
+    Description := str(rs.Fields['DESCRIPTION'].Value);
+
+    if (Length(DumpTableList) > 0) and not Contains(DumpTableList, LowercaseID(TableName)) then begin
+      rs.MoveNext;
+      continue;
+    end;
+
+    if DropObjects then
+      writeln(GetDropCmdSql('TABLE', TableName));
+    writeln('CREATE TABLE ['+TableName+'] (');
+    writeln(GetTableText(conn, TableName));
+    if HandleComments and (Description<>'') then
+      if PrivateExtensions then
+        writeln(') /**COMMENT* '+EncodeComment(Description)+'*/;')
+      else
+        writeln(') /* '+EncodeComment(Description)+' */')
+    else
+      writeln(');');
+    DumpIndexes(conn, TableName);
+    writeln('');
+    rs.MoveNext();
+  end;
+end;
+
+
 {$REGION 'ForeignKeys'}
 type
   TForeignColumn = record
@@ -1371,6 +1426,17 @@ begin
 end;
 {$ENDREGION}
 
+function GetDropConstraintCmdSql(const ATableName, AConstraint: string): string;
+begin
+  Result := 'ALTER TABLE ['+ATableName+'] DROP CONSTRAINT';
+  if Supports_IfExists then
+    Result := Result + ' IF EXISTS';
+  Result := Result + ' ['+AConstraint+']';
+  if PrivateExtensions then
+    Result := Result + ' /**WEAK**/';
+  Result := Result + ';';
+end;
+
 //Dumps foreign key creation commands for a given table
 procedure DumpForeignKeys(conn: _Connection; TableName: UniString);
 var rs: _Recordset;
@@ -1417,6 +1483,9 @@ begin
     ForKey := @ForKeys.Data[i];
     ForKey.SortColumns;
 
+    if DropObjects and not NeedDumpTables then  //because if we dumped tables then we dropped the old ones entirely
+      writeln(GetDropConstraintCmdSql(TableName, ForKey.Name));
+
     s := 'ALTER TABLE ['+TableName+'] ADD CONSTRAINT ['+ForKey.Name+'] FOREIGN KEY (';
 
     if Length(ForKey.Columns)<=0 then begin
@@ -1453,6 +1522,21 @@ begin
   if Length(ForKeys.data)>0 then
     writeln('');
 end;
+
+//Dumps foreign keys for all tables
+procedure DumpRelations(conn: _Connection);
+var rs: _Recordset;
+  TableName: UniString;
+begin
+  rs := conn.OpenSchema(adSchemaTables,
+    VarArrayOf([Unassigned, Unassigned, Unassigned, 'TABLE']), EmptyParam);
+  while not rs.EOF do begin
+      TableName := str(rs.Fields['TABLE_NAME'].Value);
+      DumpForeignKeys(conn, TableName);
+      rs.MoveNext();
+  end;
+end;
+
 
 {$IFDEF DUMP_CHECK_CONSTRAINTS}
 //Dumps check constraint creation commands for a given table
@@ -1537,77 +1621,7 @@ begin
   if Length(ForKeys.data)>0 then
     writeln('');
 end;
-{$ENDIF}
 
-//Lowercases a database ID only if IDs are configured as case-insensitive
-function LowercaseID(const AId: UniString): UniString;
-begin
-  if CaseInsensitiveIDs then
-    Result := ToLowercase(AId)
-  else
-    Result := AId;
-end;
-
-function GetDropCmdSql(const AType, ATableName: string): string;
-begin
-  Result := 'DROP '+AType;
-  if Supports_IfExists then
-    Result := Result + ' IF EXISTS';
-  Result := Result + ' ['+ATableName+']';
-  if PrivateExtensions then
-    Result := Result + ' /**WEAK**/';
-  Result := Result + ';';
-end;
-
-//Dumps table creation commands
-procedure DumpTables(conn: _Connection);
-var rs: _Recordset;
-  TableName: UniString;
-  Description: UniString;
-begin
-  rs := conn.OpenSchema(adSchemaTables,
-    VarArrayOf([Unassigned, Unassigned, Unassigned, 'TABLE']), EmptyParam);
-  while not rs.EOF do begin
-    TableName := str(rs.Fields['TABLE_NAME'].Value);
-    Description := str(rs.Fields['DESCRIPTION'].Value);
-
-    if (Length(DumpTableList) > 0) and not Contains(DumpTableList, LowercaseID(TableName)) then begin
-      rs.MoveNext;
-      continue;
-    end;
-
-    if DropObjects then
-      writeln(GetDropCmdSql('TABLE', TableName));
-    writeln('CREATE TABLE ['+TableName+'] (');
-    writeln(GetTableText(conn, TableName));
-    if HandleComments and (Description<>'') then
-      if PrivateExtensions then
-        writeln(') /**COMMENT* '+EncodeComment(Description)+'*/;')
-      else
-        writeln(') /* '+EncodeComment(Description)+' */')
-    else
-      writeln(');');
-    DumpIndexes(conn, TableName);
-    writeln('');
-    rs.MoveNext();
-  end;
-end;
-
-//Dumps foreign keys for all tables
-procedure DumpRelations(conn: _Connection);
-var rs: _Recordset;
-  TableName: UniString;
-begin
-  rs := conn.OpenSchema(adSchemaTables,
-    VarArrayOf([Unassigned, Unassigned, Unassigned, 'TABLE']), EmptyParam);
-  while not rs.EOF do begin
-      TableName := str(rs.Fields['TABLE_NAME'].Value);
-      DumpForeignKeys(conn, TableName);
-      rs.MoveNext();
-  end;
-end;
-
-{$IFDEF DUMP_CHECK_CONSTRAINTS}
 //Dumps check constraints for all tables
 procedure DumpCheckConstraints(conn: _Connection);
 var rs: _Recordset;
