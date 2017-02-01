@@ -70,6 +70,7 @@ Back to dumping options:
   * `--private-extensions` (or `--no-private-extensions`) :: enables/disabled the private comment generation (with `dump`) or parsing (with `exec`)
   * `--drop` :: adds "`DROP TABLE [tablename]`" and "`DROP VIEW [tablename]`" commands before "`CREATE TABLE/VIEW`".
 With `--private-extensions` on, these are marked as `/**WEAK**/`, which means errors on these commands will be ignored even in `--stop-on-errors` mode.
+  * `--no-create` (`--create` is by default) :: disables the creation commands (if you want only DROP commands)
   * `--enable-if-exists` :: adds `IF EXISTS` to `DROP` commands. Jet does not support this, so only when exporting to other engines.
 
 If you specify none of the above options, default dump takes place:
