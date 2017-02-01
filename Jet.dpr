@@ -154,6 +154,7 @@ begin
   err('');
   err('  --comments, --no-comments :: how comments are dumped depends on if private extensions are enabled');
   err('  --drop, --no-drop :: DROP tables etc before creating');
+  err('  --create, --no-create :: CREATE tables etc (on by default)');
   err('  --enable-if-exists, --disable-if-exists :: enables IF EXISTS option for DROP commands (not supported by Jet)');
   err('');
   err('With --tables, --views and --data you can specify individual names:');
@@ -227,7 +228,8 @@ var
  //Dump options
   HandleComments: boolean = true;
   PrivateExtensions: boolean = true;
-  DropObjects: boolean = true;
+  DropObjects: boolean = true;    //add DROP commands
+  CreateObjects: boolean = true;  //add CREATE commands
  //Log
   LoggingMode: TLoggingMode = lmDefault;
   Errors: TErrorHandlingMode = emDefault;
@@ -481,6 +483,12 @@ begin
     end else
     if WideSameText(s, '--no-drop') then begin
       DropObjects := false;
+    end else
+    if WideSameText(s, '--create') then begin
+      CreateObjects := true;
+    end else
+    if WideSameText(s, '--no-create') then begin
+      CreateObjects := false;
     end else
     if WideSameText(s, '--enable-if-exists') then begin
       Supports_IfExists := true;
@@ -1330,17 +1338,22 @@ begin
 
     if DropObjects then
       writeln(GetDropCmdSql('TABLE', TableName));
-    writeln('CREATE TABLE ['+TableName+'] (');
-    writeln(GetTableText(conn, TableName));
-    if HandleComments and (Description<>'') then
-      if PrivateExtensions then
-        writeln(') /**COMMENT* '+EncodeComment(Description)+'*/;')
+
+    if CreateObjects then begin
+      writeln('CREATE TABLE ['+TableName+'] (');
+      writeln(GetTableText(conn, TableName));
+      if HandleComments and (Description<>'') then
+        if PrivateExtensions then
+          writeln(') /**COMMENT* '+EncodeComment(Description)+'*/;')
+        else
+          writeln(') /* '+EncodeComment(Description)+' */')
       else
-        writeln(') /* '+EncodeComment(Description)+' */')
-    else
-      writeln(');');
-    DumpIndexes(conn, TableName);
-    writeln('');
+        writeln(');');
+
+      DumpIndexes(conn, TableName);
+      writeln('');
+    end;
+
     rs.MoveNext();
   end;
 end;
@@ -1483,40 +1496,43 @@ begin
     ForKey := @ForKeys.Data[i];
     ForKey.SortColumns;
 
-    if DropObjects and not NeedDumpTables then  //because if we dumped tables then we dropped the old ones entirely
+    if DropObjects and not NeedDumpTables then //the foreign keys are dropped automatically with tables
       writeln(GetDropConstraintCmdSql(TableName, ForKey.Name));
 
-    s := 'ALTER TABLE ['+TableName+'] ADD CONSTRAINT ['+ForKey.Name+'] FOREIGN KEY (';
+    if CreateObjects then begin
+      s := 'ALTER TABLE ['+TableName+'] ADD CONSTRAINT ['+ForKey.Name+'] FOREIGN KEY (';
 
-    if Length(ForKey.Columns)<=0 then begin
-      Warning('Foreign key '+ForKey.Name+' has a definition but no columns. '
-        +'This is pretty damn strange, mail a detailed bug report please.');
-    end;
+      if Length(ForKey.Columns)<=0 then begin
+        Warning('Foreign key '+ForKey.Name+' has a definition but no columns. '
+          +'This is pretty damn strange, mail a detailed bug report please.');
+      end;
 
-    s_for := ForKey.Columns[0].ForeignKey;
-    s_ref := ForKey.Columns[0].PrimaryKey;
-    for j := 1 to Length(ForKey.Columns) - 1 do begin
-      s_for := s_for + ', ' + ForKey.Columns[j].ForeignKey;
-      s_ref := s_ref + ', ' + ForKey.Columns[j].PrimaryKey;
-    end;
+      s_for := ForKey.Columns[0].ForeignKey;
+      s_ref := ForKey.Columns[0].PrimaryKey;
+      for j := 1 to Length(ForKey.Columns) - 1 do begin
+        s_for := s_for + ', ' + ForKey.Columns[j].ForeignKey;
+        s_ref := s_ref + ', ' + ForKey.Columns[j].PrimaryKey;
+      end;
 
-    s := s + s_for + ') REFERENCES ['+ForKey.PrimaryTable+'] (' + s_ref + ')';
-    if ForKey.OnUpdate<>'' then
-      s := s  + ' ON UPDATE '+ForKey.OnUpdate;
-    if ForKey.OnDelete<>'' then
-      s := s  + ' ON DELETE '+ForKey.OnDelete;
+      s := s + s_for + ') REFERENCES ['+ForKey.PrimaryTable+'] (' + s_ref + ')';
+      if ForKey.OnUpdate<>'' then
+        s := s  + ' ON UPDATE '+ForKey.OnUpdate;
+      if ForKey.OnDelete<>'' then
+        s := s  + ' ON DELETE '+ForKey.OnDelete;
 
-    s := s + ';';
+      s := s + ';';
 
-   //If PK_NAME=Null, FK is relation-only. These cannot be created by DDL
-   //at this point, and are pointless anyway (no check).
-   //Output them as a comment.
-    if VarIsNil(ForKey.PkName) or (ForKey.PkName='') then begin
-      s := '/* '+s+' */'#13#10
-        +'/* Relation-only Foreign Key commented out: cannot be defined with SQL. */';
-    end;
+     //If PK_NAME=Null, FK is relation-only. These cannot be created by DDL
+     //at this point, and are pointless anyway (no check).
+     //Output them as a comment.
+      if VarIsNil(ForKey.PkName) or (ForKey.PkName='') then begin
+        s := '/* '+s+' */'#13#10
+          +'/* Relation-only Foreign Key commented out: cannot be defined with SQL. */';
+      end;
 
-    writeln(s);
+      writeln(s);
+    end; //of CreateObjects
+
   end;
 
   if Length(ForKeys.data)>0 then
@@ -1531,9 +1547,9 @@ begin
   rs := conn.OpenSchema(adSchemaTables,
     VarArrayOf([Unassigned, Unassigned, Unassigned, 'TABLE']), EmptyParam);
   while not rs.EOF do begin
-      TableName := str(rs.Fields['TABLE_NAME'].Value);
-      DumpForeignKeys(conn, TableName);
-      rs.MoveNext();
+    TableName := str(rs.Fields['TABLE_NAME'].Value);
+    DumpForeignKeys(conn, TableName);
+    rs.MoveNext();
   end;
 end;
 
@@ -1585,37 +1601,43 @@ begin
     ForKey := @ForKeys.Data[i];
     ForKey.SortColumns;
 
-    s := 'ALTER TABLE ['+TableName+'] ADD CONSTRAINT ['+ForKey.Name+'] FOREIGN KEY (';
+    if DropObjects and not NeedDumpTables then //the foreign keys are dropped automatically with tables
+      writeln(GetDropConstraintCmdSql(TableName, ForKey.Name));
 
-    if Length(ForKey.Columns)<=0 then begin
-      Warning('Foreign key '+ForKey.Name+' has a definition but no columns. '
-        +'This is pretty damn strange, mail a detailed bug report please.');
-    end;
+    if CreateObjects then begin
+      s := 'ALTER TABLE ['+TableName+'] ADD CONSTRAINT ['+ForKey.Name+'] FOREIGN KEY (';
 
-    s_for := ForKey.Columns[0].ForeignKey;
-    s_ref := ForKey.Columns[0].PrimaryKey;
-    for j := 1 to Length(ForKey.Columns) - 1 do begin
-      s_for := s_for + ', ' + ForKey.Columns[j].ForeignKey;
-      s_ref := s_ref + ', ' + ForKey.Columns[j].PrimaryKey;
-    end;
+      if Length(ForKey.Columns)<=0 then begin
+        Warning('Foreign key '+ForKey.Name+' has a definition but no columns. '
+          +'This is pretty damn strange, mail a detailed bug report please.');
+      end;
 
-    s := s + s_for + ') REFERENCES ['+ForKey.PrimaryTable+'] (' + s_ref + ')';
-    if ForKey.OnUpdate<>'' then
-      s := s  + ' ON UPDATE '+ForKey.OnUpdate;
-    if ForKey.OnDelete<>'' then
-      s := s  + ' ON DELETE '+ForKey.OnDelete;
+      s_for := ForKey.Columns[0].ForeignKey;
+      s_ref := ForKey.Columns[0].PrimaryKey;
+      for j := 1 to Length(ForKey.Columns) - 1 do begin
+        s_for := s_for + ', ' + ForKey.Columns[j].ForeignKey;
+        s_ref := s_ref + ', ' + ForKey.Columns[j].PrimaryKey;
+      end;
 
-    s := s + ';';
+      s := s + s_for + ') REFERENCES ['+ForKey.PrimaryTable+'] (' + s_ref + ')';
+      if ForKey.OnUpdate<>'' then
+        s := s  + ' ON UPDATE '+ForKey.OnUpdate;
+      if ForKey.OnDelete<>'' then
+        s := s  + ' ON DELETE '+ForKey.OnDelete;
 
-   //If PK_NAME=Null, FK is relation-only. These cannot be created by DDL
-   //at this point, and are pointless anyway (no check).
-   //Output them as a comment.
-    if VarIsNil(ForKey.PkName) or (ForKey.PkName='') then begin
-      s := '/* '+s+' */'#13#10
-        +'/* Relation-only Foreign Key commented out: cannot be defined with SQL. */';
-    end;
+      s := s + ';';
 
-    writeln(s);
+     //If PK_NAME=Null, FK is relation-only. These cannot be created by DDL
+     //at this point, and are pointless anyway (no check).
+     //Output them as a comment.
+      if VarIsNil(ForKey.PkName) or (ForKey.PkName='') then begin
+        s := '/* '+s+' */'#13#10
+          +'/* Relation-only Foreign Key commented out: cannot be defined with SQL. */';
+      end;
+
+      writeln(s);
+    end; //of CreateObjects
+
   end;
 
   if Length(ForKeys.data)>0 then
@@ -1654,29 +1676,29 @@ begin
       continue;
     end;
 
-  (*
-    Раньше использовалось CREATE VIEW, но хотя суть та же,
-    Access не поддерживает в нём сложные запросы
-    (даже если в базе они объявлены, как VIEW).
-  *)
+   //We used CREATE VIEW before which is compatible, but does not support complicated queries in Access,
+   //even if the objects of type VIEW can host those in principle
     if DropObjects then
       writeln(GetDropCmdSql('PROCEDURE', TableName));
-    writeln('CREATE PROCEDURE ['+TableName+'] AS');
 
-   //Access seems to keep it's own ';' at the end of DEFINITION
-    Definition := Trim(str(rs.Fields['VIEW_DEFINITION'].Value));
-    if (Length(Definition)>0) and (Definition[Length(Definition)]=';') then
-      SetLength(Definition, Length(Definition)-1);
+    if CreateObjects then begin
+      writeln('CREATE PROCEDURE ['+TableName+'] AS');
 
-    if HandleComments and (Description <> '') then begin
-      writeln(Definition);
-      if PrivateExtensions then
-        writeln('/**COMMENT* '+EncodeComment(Description)+' */;')
-      else
-        writeln('/* '+EncodeComment(Description)+' */;')
-    end else
-      writeln(Definition+';');
-    writeln('');
+     //Access seems to keep it's own ';' at the end of DEFINITION
+      Definition := Trim(str(rs.Fields['VIEW_DEFINITION'].Value));
+      if (Length(Definition)>0) and (Definition[Length(Definition)]=';') then
+        SetLength(Definition, Length(Definition)-1);
+
+      if HandleComments and (Description <> '') then begin
+        writeln(Definition);
+        if PrivateExtensions then
+          writeln('/**COMMENT* '+EncodeComment(Description)+' */;')
+        else
+          writeln('/* '+EncodeComment(Description)+' */;')
+      end else
+        writeln(Definition+';');
+      writeln('');
+    end;
 
     rs.MoveNext();
   end;
@@ -1696,22 +1718,25 @@ begin
 
     if DropObjects then
       writeln(GetDropCmdSql('PROCEDURE', ProcedureName));
-    writeln('CREATE PROCEDURE ['+ProcedureName+'] AS');
 
-   //Access seems to keep it's own ';' at the end of DEFINITION
-    Definition := Trim(str(rs.Fields['PROCEDURE_DEFINITION'].Value));
-    if (Length(Definition)>0) and (Definition[Length(Definition)]=';') then
-      SetLength(Definition, Length(Definition)-1);
+    if CreateObjects then begin
+      writeln('CREATE PROCEDURE ['+ProcedureName+'] AS');
 
-    if HandleComments and (Description <> '') then begin
-      writeln(Definition);
-      if PrivateExtensions then
-        writeln('/**COMMENT* '+EncodeComment(Description)+' */;')
-      else
-        writeln('/* '+EncodeComment(Description)+' */;')
-    end else
-      writeln(Definition+';');
-    writeln('');
+     //Access seems to keep it's own ';' at the end of DEFINITION
+      Definition := Trim(str(rs.Fields['PROCEDURE_DEFINITION'].Value));
+      if (Length(Definition)>0) and (Definition[Length(Definition)]=';') then
+        SetLength(Definition, Length(Definition)-1);
+
+      if HandleComments and (Description <> '') then begin
+        writeln(Definition);
+        if PrivateExtensions then
+          writeln('/**COMMENT* '+EncodeComment(Description)+' */;')
+        else
+          writeln('/* '+EncodeComment(Description)+' */;')
+      end else
+        writeln(Definition+';');
+      writeln('');
+    end;
 
     rs.MoveNext();
   end;
