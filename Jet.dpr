@@ -1559,7 +1559,7 @@ begin
   Result := Result + ';';
 end;
 
-//Dumps table creation commands, then foreign keys and check constraints (if needed)
+//Dumps table creation commands
 procedure DumpTables(conn: _Connection);
 var rs: _Recordset;
   TableName: UniString;
@@ -1591,29 +1591,38 @@ begin
     writeln('');
     rs.MoveNext();
   end;
+end;
 
- //One more time, with foreign keys
-  if NeedDumpRelations and not rs.BOF then begin
-    rs.MoveFirst();
-    while not rs.EOF do begin
+//Dumps foreign keys for all tables
+procedure DumpRelations(conn: _Connection);
+var rs: _Recordset;
+  TableName: UniString;
+begin
+  rs := conn.OpenSchema(adSchemaTables,
+    VarArrayOf([Unassigned, Unassigned, Unassigned, 'TABLE']), EmptyParam);
+  while not rs.EOF do begin
       TableName := str(rs.Fields['TABLE_NAME'].Value);
       DumpForeignKeys(conn, TableName);
       rs.MoveNext();
-    end;
   end;
+end;
 
- {$IFDEF DUMP_CHECK_CONSTRAINTS}
- //One more time, with check constraints
-  if NeedDumpCheckConstraints and not rs.BOF then begin
-    rs.MoveFirst();
-    while not rs.EOF do begin
+{$IFDEF DUMP_CHECK_CONSTRAINTS}
+//Dumps check constraints for all tables
+procedure DumpCheckConstraints(conn: _Connection);
+var rs: _Recordset;
+  TableName: UniString;
+begin
+  rs := conn.OpenSchema(adSchemaTables,
+    VarArrayOf([Unassigned, Unassigned, Unassigned, 'TABLE']), EmptyParam);
+  while not rs.EOF do begin
       TableName := str(rs.Fields['TABLE_NAME'].Value);
       DumpCheckConstraints(conn, TableName);
       rs.MoveNext();
-    end;
   end;
- {$ENDIF}
 end;
+{$ENDIF}
+
 
 procedure DumpViews(conn: _Connection);
 var rs: _Recordset;
@@ -1774,6 +1783,20 @@ begin
     writeln('/* Tables */');
     DumpTables(conn);
   end;
+
+ //Relations (Foreign keys)
+  if NeedDumpRelations then begin
+    writeln('/* Relations */');
+    DumpRelations(conn);
+  end;
+
+ {$IFDEF DUMP_CHECK_CONSTRAINTS}
+ //Check constraints
+  if NeedDumpCheckConstraints then begin
+    writeln('/* Check constraints */')
+    DumpCheckConstraints(conn);
+  end;
+ {$ENDIF}
 
  //Views
   if NeedDumpViews then begin
