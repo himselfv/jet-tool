@@ -183,7 +183,7 @@ end;
 
 procedure Redefined(term: string; old, new: UniString);
 begin
-  raise EUsage.Create(term+' already defined: '+old+'. Cannot redefine to "'+new+'".');
+  raise EUsage.Create(term+' already specified: '+old+'. Cannot process command "'+new+'".');
 end;
 
 function IsConsoleHandle(stdHandle: cardinal): boolean; forward;
