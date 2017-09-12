@@ -124,30 +124,24 @@ begin
   err('  jet adoxschema :: output ADOX schema report');
   err('');
   err('Connection params:');
-  err('  -c [connection-string] :: uses an ADO connection string. -dp is ignored');
-  err('  -dsn [data-source-name] :: uses an ODBC data source name');
-  err('  -f [file.mdb] :: opens a jet database file');
+  err('  -f [file.mdb] :: open a jet database file (preferred)');
+  err('  -dsn [data-source-name] :: use an ODBC data source name');
+  err('  -c [connection-string] :: use an ADO connection string (least preferred, overrides many settings)');
   err('  -u [user]');
   err('  -p [password]');
   err('  -dp [database password]'); {Works fine with database creation too}
-  err('  -new :: works only with exec and filename');
+  err('  -new :: create new database (works only by filename)');
   err('  -force :: overwrite existing database (requires -new)');
   err('You cannot use -c with --comments when executing (dumping is fine).');
-  err('You can only use -new with -f.');
  (* -dsn will probably not work with --comments too, as long as it really is MS Access DSN. They deny DAO DSN connections. *)
   err('');
-  err('Database format is auto-guessed from file name, you can override:');
-  err('  --as-accdb, --accdb');
-  err('  --as-mdb, --mdb');
-  err('By default this tool will try to open any, and create most modern type (accdb).');
+  err('Database format is auto-guessed, you can override:');
+  err('  --mdb :: use older Jet 4.0 .mdb format (default)');
+  err('  --accdb :: use newer .accdb format');
+  err('  --db-format [jet10 / jet11 / jet20 / jet3x / jet4x (mdb) / ace12 (accdb)]');
+  err('By default we read any format and create jet4x MDBs, unless the file name extension is accdb.');
   err('');
-  err('Useful IO tricks:');
-  err('  -stdi [filename] :: sets standard input');
-  err('  -stdo [filename] :: sets standard output');
-  err('  -stde [filename] :: sets standard error console');
-  err('These are only applied after the command-line parsing is over');
-  err('');
-  err('What to include and whatnot for dumping:');
+  err('What to include in the dump:');
   err('  --tables, --no-tables');
   err('  --views, --no-views');
   err('  --procedures, --no-procedures');
@@ -175,20 +169,24 @@ begin
   err('  --no-private-extensions, --private-extensions :: disables dumping/parsing private extensions (see help)');
   err('');
   err('What to do with errors when executing:');
-  err('  --silent :: do not print anything (at all)');
+  err('  --silent :: do not print anything at all');
   err('  --verbose :: echo commands which are being executed');
-  err('  --ignore-errors :: continue on error');
+  err('  --ignore-errors :: continue on errors');
   err('  --stop-on-errors :: exit with error code');
   err('  --crlf-break :: CR/LF ends command');
   err('  --no-crlf-break');
-  err('With private extensions enabled, **WEAK** commands do not produce errors in any way (messages, stop).');
+  err('With private extensions enabled, **WEAK** commands do not produce errors in any way (no messages, no aborts).');
   err('');
-  err('Database access providers:');
-  err('Jet/ACE OLEDB and DAO providers have several versions which are available on different platforms. '
-    +'Newer providers can handle newer file formats.');
-  err('You can specify exact one or the best available will be chosen:');
-  err('  --oledb-eng [provider name]');
-  err('  --dao-eng [provider name]');
+  err('IO redirection helpers:');
+  err('  -stdi [filename] :: sets standard input');
+  err('  -stdo [filename] :: sets standard output');
+  err('  -stde [filename] :: sets standard error console');
+  err('These are only applied after the command-line parsing is over');
+  err('');
+  err('Jet/ACE OLEDB and DAO have several versions which are available on different platforms.');
+  err('You can override the default selection (best available + compatible):');
+  err('  --oledb-eng [provider ProgID] :: e.g. Microsoft.Jet.OLEDB.4.0');
+  err('  --dao-eng [provider ProgID] :: e.g. DAO.Engine.36');
 end;
 
 procedure BadUsage(msg: UniString='');
@@ -210,6 +208,17 @@ type
   TErrorHandlingMode = (emDefault, emIgnore, emStop);
   TTriBool = (tbDefault, tbTrue, tbFalse);
 
+ //Multiple database formats are supported by JET/ACE providers.
+  TDatabaseFormat = (
+    dbfDefault,         //auto-select from file name, default to MDB4.0
+    dbfMdb10,           //various older versions
+    dbfMdb11,
+    dbfMdb20,
+    dbfMdb3x,
+    dbfMdb4x,           //latest MDB
+    dbfAccdb            //ACCDB
+  );
+
 var
   Command: UniString;
 
@@ -227,7 +236,7 @@ var
   DatabasePassword: UniString;
   NewDb: boolean;
   ForceNewDb: boolean;
-  DatabaseFormat: (dbfDefault, dbfMdb, dbfAccdb) = dbfDefault;
+  DatabaseFormat: TDatabaseFormat = dbfDefault;
 
  //Database options
   CaseInsensitiveIDs: boolean;
@@ -401,14 +410,36 @@ begin
     end else
 
    //Database format
-    if WideSameText(s, '--as-accdb')
-    or WideSameText(s, '--accdb') then begin
+    if WideSameText(s, '--db-format')
+    or WideSameText(s, '--database-format') then begin
+      s := NextParam('--database-format', 'format name');
+      if WideSameText(s, 'jet10') then
+        DatabaseFormat := dbfMdb10
+      else
+      if WideSameText(s, 'jet11') then
+        DatabaseFormat := dbfMdb11
+      else
+      if WideSameText(s, 'jet20') then
+        DatabaseFormat := dbfMdb20
+      else
+      if WideSameText(s, 'jet3x') then
+        DatabaseFormat := dbfMdb3x
+      else
+      if WideSameText(s, 'jet4x') then
+        DatabaseFormat := dbfMdb4x
+      else
+      if WideSameText(s, 'ace12') then
+        DatabaseFormat := dbfAccdb
+      else
+        BadUsage('Unsupported database format: '+s);
+    end else
+   //Some shortcuts
+    if WideSameText(s, '--as-mdb') then
+      DatabaseFormat := dbfMdb4x
+    else
+    if WideSameText(s, '--as-accdb') then
       DatabaseFormat := dbfAccdb
-    end else
-    if WideSameText(s, '--as-mdb')
-    or WideSameText(s, '--mdb') then begin
-      DatabaseFormat := dbfMdb
-    end else
+    else
 
    //Database options
     if WideSameText(s, '--case-sensitive-ids') then begin
@@ -610,7 +641,7 @@ begin
     BadUsage('-force requires -new');
 
   if NewDb and not ForceNewDb and FileExists(Filename) then
-    raise Exception.Create('File '+Filename+' already exists. Cannot create a new one.');
+    raise Exception.Create('File '+Filename+' already exists. Use -force with -new to overwrite.');
 
  //Whether we can use DAO. If not, prefer other options.
   CanUseDao := (Filename<>'');
@@ -691,22 +722,48 @@ end;
 //Called if the user has not specified a provider explicitly.
 procedure AutodetectOleDbProvider;
 var clsid: TGUID;
+const
+  sOleDbProviderJet4: string = 'Microsoft.Jet.OLEDB.4.0';
+  sOleDbProviderAce12: string = 'Microsoft.ACE.OLEDB.12.0';
 begin
-  //For now prefer the most modern version.
-  //There are rumors that ACE 12 works differently from Jet 4.0 on old DBs,
-  //then we'll switch to "Jet for mdb, Ace for accdb" scheme.
+(*
+Different providers support different sets of database formats:
+  Jet 4.0 supports Jet11-Jet4x (MDB), but not Ace12 (ACCDB)
+  ACE 12  supports Ace12 (ACCDB)
 
-  if CLSIDFromProgID('Microsoft.ACE.OLEDB.12.0', clsid) then begin
-    Providers.OleDbEng := 'Microsoft.ACE.OLEDB.12.0';
-    exit;
-  end;
+ACE also supports Jet11-Jet4x, but it's complicated:
+* some features reportedly work differently, notably some field types and user/password support.
+* ACE14+ deprecates Jet11-Jet20
 
-  if CLSIDFromProgID('Microsoft.Jet.OLEDB.4.0', clsid) then begin
-    Providers.OleDbEng := 'Microsoft.Jet.OLEDB.4.0';
+Jet 4.0 is almost universally available anyway, so we'll prefer it for older DB types,
+and prefer ACE 12 for accdb.
+
+Note that DAO preference needs not to follow ADO preference strictly.
+*)
+
+ //For Accdb, try ACE12 first
+  if DatabaseFormat = dbfAccdb then
+    if CLSIDFromProgID(sOleDbProviderAce12, clsid) then begin
+      Providers.OleDbEng := sOleDbProviderAce12;
+      exit;
+    end;
+
+ //Try Jet 4.0
+  if CLSIDFromProgID(sOleDbProviderJet4, clsid) then begin
+    Providers.OleDbEng := sOleDbProviderJet4;
     if DatabaseFormat = dbfAccdb then
+      //We have found something, but it's not ACE12
       err('ERROR: ACCDB format requires Microsoft.ACE.OLEDB.12.0 provider which has not been found. The operations will likely fail.');
     exit;
   end;
+
+ //For MDBs try ACE12 as a last resort
+  if DatabaseFormat <> dbfAccdb then
+    if CLSIDFromProgID(sOleDbProviderAce12, clsid) then begin
+      Providers.OleDbEng := sOleDbProviderAce12;
+      log('NOTE: Fallback to ACE12 for older database access may introduce some inconsistencies.');
+      exit;
+    end;
 
   err('ERROR: Jet/ACE OLEDB provider not found. The operations will likely fail.');
   //Still set the most compatible provider just in case
@@ -715,23 +772,41 @@ end;
 
 
 const
-  Jet10 = 1;
-  Jet11 = 2;
-  Jet20 = 3;
-  Jet3x = 4;
-  Jet4x = 5;
+  JetEngineType_Jet10 = 1;
+  JetEngineType_Jet11 = 2;
+  JetEngineType_Jet20 = 3;
+  JetEngineType_Jet3x = 4;
+  JetEngineType_Jet4x = 5;
+  JetEngineType_Ace12 = 6;  //confirmed
+  //Some other known types:
+  // DBASE3 = 10;
+  // Xslx = 30 / 37 in some examples.
 
 var
   AdoxCatalog: Catalog;
 
 //Creates a new database and resets a database-creation-required flag.
 procedure CreateNewDatabase;
+var engType: integer;
 begin
   if ForceNewDb and FileExists(Filename) then
     DeleteFileW(PWideChar(Filename));
+
+  case DatabaseFormat of
+    dbfMdb10: engType := JetEngineType_Jet10;
+    dbfMdb11: engType := JetEngineType_Jet11;
+    dbfMdb20: engType := JetEngineType_Jet20;
+    dbfMdb3x: engType := JetEngineType_Jet3x;
+    dbfMdb4x: engType := JetEngineType_Jet4x;
+    dbfAccdb: engType := JetEngineType_Ace12;
+  else
+   //By default, create Jet4x MDB
+    engType := JetEngineType_Jet4x;
+  end;
+
   AdoxCatalog := CoCatalog.Create;
   AdoxCatalog.Create(ConnectionString
-    + 'Jet OLEDB:Engine Type='+IntToStr(Jet4x)+';');
+    + 'Jet OLEDB:Engine Type='+IntToStr(engType)+';');
   if LoggingMode=lmVerbose then
     writeln('Database created.');
   NewDb := false; //works only once
@@ -792,6 +867,9 @@ const
 //Automatically detects which supported DAO providers are available and chooses one,
 //or finds the provider the user has specified.
 procedure AutodetectDao;
+const
+  sDaoEngine36 = 'DAO.DBEngine.36';
+  sDaoEngine120 = 'DAO.DBEngine.120';
 begin
  //If explicit DAO provider is set, simply convert it to CLSID.
   if Providers.DaoEng <> '' then begin
@@ -802,22 +880,36 @@ begin
     exit;
   end;
 
-  //If we don't have a preconfigured DAO Engine, figure out which we can use
-  //For now prefer the most modern version.
+(*
+  As with ADO, prefer older DAO for older database types, and newer DAO for ACCDB.
+  DAO preference needs not to be strictly in sync with Jet preference:
+     OLEDB engine: Jet4.0,  DAO engine: DAO120    <-- this is okay (if both can handle the file)
+*)
 
-  if CLSIDFromProgID('DAO.DBEngine.120', Dao.ProviderCLSID) then begin
-    Providers.DaoEng := 'DAO.DBEngine.120';
-    Dao.SupportState := ssDetected;
-    exit;
-  end;
+  //For ACCDB try DAO120 first
+  if DatabaseFormat = dbfAccdb then
+    if CLSIDFromProgID(sDaoEngine120, Dao.ProviderCLSID) then begin
+      Providers.DaoEng := sDaoEngine120;
+      Dao.SupportState := ssDetected;
+      exit;
+    end;
 
-  if CLSIDFromProgID('DAO.DBEngine.36', Dao.ProviderCLSID) then begin
-    Providers.DaoEng := 'DAO.DBEngine.36';
+  //DAO36
+  if CLSIDFromProgID(sDaoEngine36, Dao.ProviderCLSID) then begin
+    Providers.DaoEng := sDaoEngine36;
     Dao.SupportState := ssDetected;
     if DatabaseFormat = dbfAccdb then
       err('WARNING: ACCDB format requires DAO.DBEngine.120 provider which is not found. DAO operations will probably fail.');
     exit;
   end;
+
+  if DatabaseFormat <> dbfAccdb then
+    if CLSIDFromProgID(sDaoEngine120, Dao.ProviderCLSID) then begin
+      Providers.DaoEng := sDaoEngine120;
+      Dao.SupportState := ssDetected;
+      log('NOTE: Fallback to DAO120 for older database access may introduce some inconsistencies.');
+      exit;
+    end;
 
   err('WARNING: No compatible DAO provider found. DAO operations will be unavailable.');
  {$IFDEF CPUX64}
