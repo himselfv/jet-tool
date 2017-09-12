@@ -99,6 +99,9 @@ begin
   writeln(ErrOutput, msg);
 end;
 
+//Writes a string to error output if verbose log is enabled.
+procedure log(msg: UniString); forward;
+
 type
   EUsage = class(Exception);
 
@@ -132,6 +135,11 @@ begin
   err('You cannot use -c with --comments when executing (dumping is fine).');
   err('You can only use -new with -f.');
  (* -dsn will probably not work with --comments too, as long as it really is MS Access DSN. They deny DAO DSN connections. *)
+  err('');
+  err('Database format is auto-guessed from file name, you can override:');
+  err('  --as-accdb, --accdb');
+  err('  --as-mdb, --mdb');
+  err('By default this tool will try to open any, and create most modern type (accdb).');
   err('');
   err('Useful IO tricks:');
   err('  -stdi [filename] :: sets standard input');
@@ -173,7 +181,14 @@ begin
   err('  --stop-on-errors :: exit with error code');
   err('  --crlf-break :: CR/LF ends command');
   err('  --no-crlf-break');
-  err('With private extensions enabled, **WEAK** commands do not produce errors in any way (messages, stop).')
+  err('With private extensions enabled, **WEAK** commands do not produce errors in any way (messages, stop).');
+  err('');
+  err('Database access providers:');
+  err('Jet/ACE OLEDB and DAO providers have several versions which are available on different platforms. '
+    +'Newer providers can handle newer file formats.');
+  err('You can specify exact one or the best available will be chosen:');
+  err('  --oledb-eng [provider name]');
+  err('  --dao-eng [provider name]');
 end;
 
 procedure BadUsage(msg: UniString='');
@@ -197,6 +212,13 @@ type
 
 var
   Command: UniString;
+
+ //Providers
+  Providers: record
+    OleDbEng: UniString;        //set by user or auto-detected
+    DaoEng: UniString;          //set by user or auto-detected
+  end;
+
  //Connection
   ConnectionString: UniString;
   DataSourceName: UniString;
@@ -205,6 +227,8 @@ var
   DatabasePassword: UniString;
   NewDb: boolean;
   ForceNewDb: boolean;
+  DatabaseFormat: (dbfDefault, dbfMdb, dbfAccdb) = dbfDefault;
+
  //Database options
   CaseInsensitiveIDs: boolean;
   Supports_IfExists: boolean; //database supports IF EXISTS syntax
@@ -285,6 +309,7 @@ begin
   SetLength(DumpDataList, 0);
 end;
 
+procedure AutodetectOleDbProvider; forward;
 
 procedure ParseCommandLine;
 var i: integer;
@@ -365,6 +390,24 @@ begin
     end else
     if WideSameText(s, '-force') then begin
       ForceNewDb := true;
+    end else
+
+   //Database provider options
+    if WideSameText(s, '--oledb-eng') then begin
+      Define(Providers.OleDbEng, 'OLEDB Engine', NextParam('--oledb-eng', 'OLEDB Engine'));
+    end else
+    if WideSameText(s, '--dao-eng') then begin
+      Define(Providers.DaoEng, 'DAO Engine', NextParam('--dao-eng', 'DAO Engine'));
+    end else
+
+   //Database format
+    if WideSameText(s, '--as-accdb')
+    or WideSameText(s, '--accdb') then begin
+      DatabaseFormat := dbfAccdb
+    end else
+    if WideSameText(s, '--as-mdb')
+    or WideSameText(s, '--mdb') then begin
+      DatabaseFormat := dbfMdb
     end else
 
    //Database options
@@ -580,14 +623,27 @@ begin
       BadUsage('You cannot use ConnectionString source with --comments when doing "exec"');
   end;
 
+ //Auto-enable accdb by file name (if not explicitly disable)
+  if (DatabaseFormat = dbfDefault) and (ExtractFileExt(Filename) = '.accdb') then
+    DatabaseFormat := dbfAccdb;
+ //We can't auto-enable Accdb in other cases (connection string / data source name),
+ //so force it with --accdb if it matters.
+
+ //To build a ConnectionString we need to select an OLEDB provider.
+ //We can't delay it until first use because ConnectionString is needed both by ADO and ADOX.
+  if Providers.OleDbEng = '' then
+    AutoDetectOleDbProvider();
+ //On the other hand, DAO detection can be safely delayed until first use.
+
  //Convert all sources to ConnectionStrings
   if Filename<>'' then
-    ConnectionString := 'Provider=Microsoft.Jet.OLEDB.4.0;Data Source="'+Filename+'";'
+    ConnectionString := 'Provider='+Providers.OleDbEng+';Data Source="'+Filename+'";'
   else
   if DataSourceName <> '' then
-    ConnectionString := 'Provider=Microsoft.Jet.OLEDB.4.0;Data Source="'+DataSourceName+'";';
+    ConnectionString := 'Provider='+Providers.OleDbEng+';Data Source="'+DataSourceName+'";';
 
   if DatabasePassword<>'' then
+   //Thankfully the parameter name has not been changed in ACE 12.0
     ConnectionString := ConnectionString + 'Jet OLEDB:Database Password="'+DatabasePassword+'";';
 
  //If no modifications have been made, dump default set of stuff
@@ -618,6 +674,43 @@ begin
       CrlfBreak := tbTrue
     else
       CrlfBreak := tbFalse;
+end;
+
+
+
+function CLSIDFromProgID(const ProgID: UniString; out clsid: TGUID): boolean;
+var hr: HRESULT;
+begin
+  hr := ActiveX.CLSIDFromProgID(PChar(ProgID), clsid);
+  Result := SUCCEEDED(hr);
+  if not Result then
+    log('Trying class '+ProgID+'... not found.');
+end;
+
+//Automatically detects which supported OLEDB Jet providers are available and chooses one.
+//Called if the user has not specified a provider explicitly.
+procedure AutodetectOleDbProvider;
+var clsid: TGUID;
+begin
+  //For now prefer the most modern version.
+  //There are rumors that ACE 12 works differently from Jet 4.0 on old DBs,
+  //then we'll switch to "Jet for mdb, Ace for accdb" scheme.
+
+  if CLSIDFromProgID('Microsoft.ACE.OLEDB.12.0', clsid) then begin
+    Providers.OleDbEng := 'Microsoft.ACE.OLEDB.12.0';
+    exit;
+  end;
+
+  if CLSIDFromProgID('Microsoft.Jet.OLEDB.4.0', clsid) then begin
+    Providers.OleDbEng := 'Microsoft.Jet.OLEDB.4.0';
+    if DatabaseFormat = dbfAccdb then
+      err('ERROR: ACCDB format requires Microsoft.ACE.OLEDB.12.0 provider which has not been found. The operations will likely fail.');
+    exit;
+  end;
+
+  err('ERROR: Jet/ACE OLEDB provider not found. The operations will likely fail.');
+  //Still set the most compatible provider just in case
+  Providers.OleDbEng := 'Microsoft.Jet.OLEDB.4.0';
 end;
 
 
@@ -656,20 +749,9 @@ begin
   Result := AdoxCatalog;
 end;
 
+
 var
   AdoConnection: _Connection;
-
-//Returns an ADO connection. Caching is implemented
-function GetAdoConnection: _Connection;
-begin
-  if NewDb then CreateNewDatabase;
-  if AdoConnection=nil then begin
-    Result := CoConnection.Create;
-    Result.Open(ConnectionString, User, Password, 0);
-    AdoConnection := Result;
-  end else
-    Result := AdoConnection;
-end;
 
 //Returns a NEW ADO connection.
 function EstablishAdoConnection: _Connection;
@@ -679,33 +761,108 @@ begin
   Result.Open(ConnectionString, User, Password, 0);
 end;
 
-var
-  DaoEngine: DbEngine;
-  DaoConnection: Database;
-
-procedure NeededDaoError;
+//Returns an ADO connection. Caching is implemented
+function GetAdoConnection: _Connection;
 begin
-  raise Exception.Create('The operation you''re performing apparently requires '
-    +'DAO. DAO and DAO-dependent functions can only be accessed through Filename '
-    +'source. That you see this error must mean that somehow this condition was not '
-    +'properly verified during command-line parsing. '#13
-    +'Please file a bug to the developers. For the time being, try to guess which '
-    +'setting required DAO (usually something obscure like importing comments) '
-    +'and either disable that or switch to connecting through Filename.');
+  if NewDb then CreateNewDatabase;
+  if AdoConnection=nil then begin
+    Result := EstablishAdoConnection;
+    AdoConnection := Result;
+  end else
+    Result := AdoConnection;
 end;
 
-//Returns a DAO connection. Caching is implemented.
-function GetDaoConnection: Database;
-var Params: OleVariant;
+
+var
+  DaoConnection: Database = nil;
+  Dao: record
+    SupportState: (
+      ssUntested,
+      ssDetected,           //ProviderCLSID is valid
+      ssUnavailable         //No DAO provider or DAO disabled by connection type
+      );
+    ProviderCLSID: TGUID;
+  end = (SupportState: ssUntested);
+
+//These are not used and are provided only for information. We query the registry by ProgIDs.
+const
+  CLASS_DAO36_DBEngine_x86 = '{00000100-0000-0010-8000-00AA006D2EA4}'; //no x64 version exists
+  CLASS_DAO120_DBEngine = '{CD7791B9-43FD-42C5-AE42-8DD2811F0419}'; //both x64 and x86
+
+//Automatically detects which supported DAO providers are available and chooses one,
+//or finds the provider the user has specified.
+procedure AutodetectDao;
 begin
-  if Assigned(DaoConnection) then begin
-    Result := DaoConnection;
+ //If explicit DAO provider is set, simply convert it to CLSID.
+  if Providers.DaoEng <> '' then begin
+    if not CLSIDFromProgID(Providers.DaoEng, Dao.ProviderCLSID) then
+     //Since its explicitly configured, we should raise
+      raise Exception.Create('Cannot find DAO provider with ProgID='+Providers.DaoEng);
+    Dao.SupportState := ssDetected;
     exit;
   end;
 
+  //If we don't have a preconfigured DAO Engine, figure out which we can use
+  //For now prefer the most modern version.
+
+  if CLSIDFromProgID('DAO.DBEngine.120', Dao.ProviderCLSID) then begin
+    Providers.DaoEng := 'DAO.DBEngine.120';
+    Dao.SupportState := ssDetected;
+    exit;
+  end;
+
+  if CLSIDFromProgID('DAO.DBEngine.36', Dao.ProviderCLSID) then begin
+    Providers.DaoEng := 'DAO.DBEngine.36';
+    Dao.SupportState := ssDetected;
+    if DatabaseFormat = dbfAccdb then
+      err('WARNING: ACCDB format requires DAO.DBEngine.120 provider which is not found. DAO operations will probably fail.');
+    exit;
+  end;
+
+  err('WARNING: No compatible DAO provider found. DAO operations will be unavailable.');
+ {$IFDEF CPUX64}
+  err('  Note that this X64 build of jet-tool cannot use 32-bit only DAO.DBEngine.36 even if it''s installed. '
+    +'You need DAO.DBEngine.120 which is included in "Microsoft Office 12.0 Access Database Engine Objects Library" and later.');
+ {$ENDIF}
+  Dao.SupportState := ssUnavailable;
+end;
+
+resourcestring
+  sDaoUnavailable =
+    'The operation you''re trying to perform requires DAO. No supported DAO providers have been detected.'
+  + 'This tool requires either DAO.DBEngine.120 or DAO.DBEngine.36.'#13
+  + 'Install the required DAO providers, override DAO provider selection or disable the features that require DAO.';
+  sDaoConnectionTypeWrong =
+    'The operation you''re trying to perform requires DAO. DAO and DAO-dependent functions can only be '
+  + 'accessed through Filename source.'#13
+  + 'Somehow this condition was not properly verified during command-line parsing. '
+  + 'Please file a bug to the developers.'#13
+  + 'For the time being, disable the setting that required DAO (usually something obscure like importing '
+  + 'comments) or switch to connecting through Filename.';
+
+
+//Establishes a NEW DAO connection. Also refreshes the engine cache.
+//Usually called every time DAO connection is needed by a DAO-dependent proc.
+function EstablishDaoConnection: Database;
+var DaoEngine: _DbEngine;
+  Params: OleVariant;
+begin
   if NewDb then CreateNewDatabase;
 
-  DaoEngine := CoDbEngine.Create;
+  //Figure out supported DAO engine and its CLSID
+  if Dao.SupportState = ssUntested then
+    AutodetectDao();
+  if Dao.SupportState = ssUnavailable then
+    //Since we're here, someone tried to use Dao functions anyway. Raise!
+    raise Exception.Create(sDaoUnavailable);
+
+ //Doing the same as this would, only with variable CLSID:
+ //  DaoEngine := CoDbEngine.Create;
+  DaoEngine := CreateComObject(Dao.ProviderCLSID) as DBEngine;
+
+ //Do not disable, or Dao refreshing will break too
+  DaoEngine.Idle(dbRefreshCache);
+
   if Filename<>'' then begin
     if DatabasePassword<>'' then
       Params := UniString('MS Access;pwd=')+DatabasePassword
@@ -718,32 +875,22 @@ begin
     Params := 'ODBC;DSN='+DataSourceName+';UID='+User+';PWD='+Password+';';
     Result := DaoEngine.OpenDatabase('', False, False, Params);
   end else
-    NeededDaoError();
+    raise Exception.Create(sDaoConnectionTypeWrong);
 end;
 
-//Establishes a NEW DAO connection. Also refreshes the engine cache.
-//Usually called every time DAO connection is needed by a DAO-dependent proc.
-function EstablishDaoConnection: Database;
-var DbEngine: _DbEngine;
-  Params: OleVariant;
+//Returns a DAO connection. Caching is implemented.
+function GetDaoConnection: Database;
 begin
-  DbEngine := CoDbEngine.Create;
- //Do not disable, or Dao refreshing will break too
-  DbEngine.Idle(dbRefreshCache);
-  if Filename<>'' then begin
-    if DatabasePassword<>'' then
-      Params := UniString('MS Access;pwd=')+DatabasePassword
-    else
-      Params := '';
-    Result := DbEngine.OpenDatabase(Filename, False, False, Params);
-  end else
-  if DataSourceName<>'' then begin
-   //Although this will probably not work
-    Params := 'ODBC;DSN='+DataSourceName+';UID='+User+';PWD='+Password+';';
-    Result := DbEngine.OpenDatabase('', False, False, Params);
-  end else
-    NeededDaoError();
+  if Assigned(DaoConnection) then begin
+    Result := DaoConnection;
+    exit;
+  end;
+  Result := EstablishDaoConnection;
+  DaoConnection := Result;
 end;
+
+
+
 
 //This is needed before you CoUninitialize Ole. More notes where this is called.
 procedure ClearOleObjects;
@@ -2188,6 +2335,12 @@ function IsConsoleHandle(stdHandle: cardinal): boolean;
 begin
  //Failing GetFileType/GetStdHandle is fine, we'll return false.
   Result := (GetFileType(GetStdHandle(stdHandle))=FILE_TYPE_CHAR);
+end;
+
+procedure log(msg: UniString);
+begin
+  if LoggingMode = lmVerbose then
+    err(msg);
 end;
 
 

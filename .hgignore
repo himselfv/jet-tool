@@ -4,6 +4,7 @@ __history
 *.identcache
 *.local
 *.dcu
+*.rsm
 
 # Secondary project files are not stored at this time
 *.res
