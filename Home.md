@@ -6,11 +6,12 @@ It also lets you execute those files, or any other SQL files, or SQL commands fr
 
 Usage information is available by doing "`jet help`".
 
-## Syntax ##
+## Syntax
 Syntax:
 `jet <command> [params]`
 
-Available comands:
+
+### Available comands
 
   * `jet help` :: displays help
   * `jet touch` :: connect to database and quit (useful for creating an empty DB or verifying connection)
@@ -18,15 +19,12 @@ Available comands:
   * `jet exec` :: executes keyboard input. To execute an sql file, pass it as input with "jet exec < filename.sql". See also: `-stdi` option.
   * `jet schema` :: dumps "openSchema()" tables.
 
-In case you somehow cannot redirect the tool input and output through the usual command-line piping, you can specify redirects with these options:
 
-  * `-stdi [filename]`
-  * `-stdo [filename]`
-  * `-stde [filename]`
+### Connection options
 
-There are three ways to specify database connection. Some of them are less preferable than others because they're limited in what you can do. For certain operations this tool uses DAO, which cannot connect to Jet databases by anything other than file name (and cannot connect to ANY databases by ADO ConnectionString).
+There are three ways to specify database connection. Some are less preferable than others because they're limited in what you can do. For certain operations this tool uses DAO, which cannot connect to Jet databases by anything other than file name (and cannot connect to ANY databases by ADO ConnectionString).
 
-If the tool cannot use DAO, it'll silently disable the optional features relying on it, but if you explicitly enable those through the command-line, it'll fail.
+If the tool cannot use DAO, it'll silently disable the optional features relying on it, but if you explicitly enable those through the command-line it'll fail.
 
 Database connection options:
 
@@ -36,8 +34,29 @@ Database connection options:
   * `-u [username]`
   * `-p [password]`
   * `-dp [database password]`
-  * `-new` :: creates a new database. This works only with filename type connections.
+  * `-new` :: create a new database (works only by file name).
   * `-force` :: overwrite exitsting database (requires `-new`)
+
+Database format:
+
+  * `--mdb` :: use Jet 4.0 .mdb format (default)
+  * `--accdb` :: use .accdb format
+  * `--db-format [jet10 / jet11 / jet20 / jet3x / jet4x (mdb) / ace12 (accdb)]` :: precise format selection
+
+By default the tool assumes jet4x MDBs, unless the file name extension is accdb. Examples:
+
+ * `jet touch -new -f test1.accdb` :: create a new accdb database
+ * `jet dump -f test2.db --accdb` :: dump accdb database with an unusual extension
+
+Providers:
+
+Accdb format support requires [newer providers installed](Providers). The best available provider will be auto-selected, you can override this:
+
+ * `--oledb-eng [provider ProgID]` :: e.g. Microsoft.Jet.OLEDB.4.0
+ * `--dao-eng [provider ProgID]` :: e.g. DAO.Engine.36
+
+
+### Dump contents
 
 What to include in dumps:
 
@@ -77,6 +96,9 @@ If you specify none of the above options, default dump takes place:
 
   `--tables --views --comments --relations --procedures --drop --private-extensions`
 
+
+### Misc options
+
 Logging options:
 
   * `--silent` :: do not print anything at all
@@ -104,11 +126,23 @@ When the tool is unsure and thinks the input might be coming from file, these ar
 
 You can explicitly set these options via command-line in which case no guessing is made.
 
-## Limitations ##
+I/O redirection:
+
+If you cannot redirect the tool input and output through the usual command-line piping you can specify redirects with these options:
+
+  * `-stdi [filename]`
+  * `-stdo [filename]`
+  * `-stde [filename]`
+
+
+## Additional information ##
+
+See [[FAQ]] for frequently asked questions and problems.
+
 See [Limitations](Unsupported) of what the tool can support in the database.
 
 ## Development ##
-This tool is written in Object Pascal and should probably compile on Delphi 2005+ or equiualent FreePascal. If you want to build it from the sources, read [[Building]] notes.
+This tool is written in Object Pascal and should probably compile on Delphi 2005+ or compatible FreePascal. If you want to build it from the sources, see [Building notes](Building).
 
 This tool is not being actively developed, but you can contact me if you need an option which is not available.
 
