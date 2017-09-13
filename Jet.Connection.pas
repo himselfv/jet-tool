@@ -18,7 +18,6 @@ type
     dbfAccdb            //ACCDB
   );
 
-
 //Application settings. Mostly configured via command line.
 var
   Providers: record
@@ -42,7 +41,7 @@ var //Dynamic properties
 type
   TConnectionSettingsParser = class(TCommandLineParser)
   public
-    procedure Reset; override;
+    procedure ShowHelp; override;
     function HandleOption(ctx: PParsingContext; const s: UniString): boolean; override;
     procedure Finalize; override;
   end;
@@ -67,8 +66,31 @@ uses SysUtils, Windows, ActiveX, ComObj, AdoInt, Jet.IO;
 
 procedure AutodetectOleDbProvider; forward;
 
-procedure TConnectionSettingsParser.Reset;
+procedure TConnectionSettingsParser.ShowHelp;
 begin
+  err('Connection params:');
+  err('  -f [file.mdb] :: open a jet database file (preferred)');
+  err('  -dsn [data-source-name] :: use an ODBC data source name');
+  err('  -c [connection-string] :: use an ADO connection string (least preferred, overrides many settings)');
+  err('  -u [user]');
+  err('  -p [password]');
+  err('  -dp [database password]'); {Works fine with database creation too}
+  err('  -new :: create a new database (works only by file name)');
+  err('  -force :: overwrite existing database (requires -new)');
+  err('You cannot use -c with --comments when executing (dumping is fine).');
+ (* -dsn will probably not work with --comments too, as long as it really is MS Access DSN. They deny DAO DSN connections. *)
+  err('');
+  err('Database format:');
+  err('  --mdb :: use Jet 4.0 .mdb format (default)');
+  err('  --accdb :: use .accdb format');
+  err('  --db-format [jet10 / jet11 / jet20 / jet3x / jet4x (mdb) / ace12 (accdb)]');
+  err('By default the tool guesses by the file name (assumes jet4x MDBs unless the extension is accdb).');
+  err('');
+  err('Jet/ACE OLEDB and DAO have several versions which are available on different platforms.');
+  err('You can override the default selection (best compatible available):');
+  err('  --oledb-eng [ProgID] :: e.g. Microsoft.Jet.OLEDB.4.0');
+  err('  --dao-eng [ProgID] :: e.g. DAO.Engine.36');
+  err('');
 end;
 
 function TConnectionSettingsParser.HandleOption(ctx: PParsingContext; const s: UniString): boolean;

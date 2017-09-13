@@ -34,6 +34,7 @@ type
 
   TCommandLineParser = class
   public
+    procedure ShowHelp; virtual;
     procedure Reset; virtual;
     function HandleOption(ctx: PParsingContext; const s: UniString): boolean; virtual;
     procedure Finalize; virtual;
@@ -61,7 +62,7 @@ end;
 
 procedure TParsingContext.Reset;
 begin
-  i := 1;
+  i := 0;
 end;
 
 //Tries to consume one more argument from the command line or returns false
@@ -100,6 +101,10 @@ begin
 end;
 
 
+procedure TCommandLineParser.ShowHelp;
+begin
+  //Override to output help for the options covered
+end;
 
 procedure TCommandLineParser.Reset;
 begin

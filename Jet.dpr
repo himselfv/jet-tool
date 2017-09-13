@@ -114,24 +114,9 @@ begin
   err('  jet daoschema :: output DAO schema report');
   err('  jet adoxschema :: output ADOX schema report');
   err('');
-  err('Connection params:');
-  err('  -f [file.mdb] :: open a jet database file (preferred)');
-  err('  -dsn [data-source-name] :: use an ODBC data source name');
-  err('  -c [connection-string] :: use an ADO connection string (least preferred, overrides many settings)');
-  err('  -u [user]');
-  err('  -p [password]');
-  err('  -dp [database password]'); {Works fine with database creation too}
-  err('  -new :: create a new database (works only by file name)');
-  err('  -force :: overwrite existing database (requires -new)');
-  err('You cannot use -c with --comments when executing (dumping is fine).');
- (* -dsn will probably not work with --comments too, as long as it really is MS Access DSN. They deny DAO DSN connections. *)
-  err('');
-  err('Database format:');
-  err('  --mdb :: use Jet 4.0 .mdb format (default)');
-  err('  --accdb :: use .accdb format');
-  err('  --db-format [jet10 / jet11 / jet20 / jet3x / jet4x (mdb) / ace12 (accdb)]');
-  err('By default the tool guesses by the file name (assumes jet4x MDBs unless the extension is accdb).');
-  err('');
+
+  ConnectionSettings.ShowHelp;
+
   err('What to include in the dump:');
   err('  --tables, --no-tables');
   err('  --views, --no-views');
@@ -159,33 +144,9 @@ begin
   err('Works both for dumping and executing:');
   err('  --no-private-extensions, --private-extensions :: disables dumping/parsing private extensions (see help)');
   err('');
-  err('What to do with errors when executing:');
-  err('  --silent :: do not print anything at all');
-  err('  --verbose :: echo commands which are being executed');
-  err('  --ignore-errors :: continue on errors');
-  err('  --stop-on-errors :: exit with error code');
-  err('  --crlf-break :: CR/LF ends command');
-  err('  --no-crlf-break');
-  err('With private extensions enabled, **WEAK** commands do not produce errors in any way (no messages, no aborts).');
-  err('');
-  err('IO redirection helpers:');
-  err('  -stdi [filename] :: sets standard input');
-  err('  -stdo [filename] :: sets standard output');
-  err('  -stde [filename] :: sets standard error console');
-  err('These are only applied after the command-line parsing is over');
-  err('');
-  err('Jet/ACE OLEDB and DAO have several versions which are available on different platforms.');
-  err('You can override the default selection (best compatible available):');
-  err('  --oledb-eng [ProgID] :: e.g. Microsoft.Jet.OLEDB.4.0');
-  err('  --dao-eng [provider ProgID] :: e.g. DAO.Engine.36');
+
+  IoSettings.ShowHelp;
 end;
-
-
-type
- //"Default" states are needed because some defaults are unknown until later.
- //They will be resolved before returning from ParseCommandLine.
-  TErrorHandlingMode = (emDefault, emIgnore, emStop);
-  TTriBool = (tbDefault, tbTrue, tbFalse);
 
 
 var
@@ -216,9 +177,6 @@ var
   PrivateExtensions: boolean = true;
   DropObjects: boolean = true;    //add DROP commands
   CreateObjects: boolean = true;  //add CREATE commands
- //IO
-  Errors: TErrorHandlingMode = emDefault;
-  CrlfBreak: TTriBool = tbDefault;
 
 procedure ConfigureDumpAllSources;
 begin
@@ -268,7 +226,6 @@ end;
 procedure ParseCommandLine;
 var ctx: TParsingContext;
   s, list: UniString;
-  KeyboardInput: boolean;
 
 begin
   ctx.Reset;
@@ -413,27 +370,6 @@ begin
       Supports_IfExists := false;
     end else
 
-    if WideSameText(s, '--silent') then begin
-      LoggingMode := lmSilent
-    end else
-    if WideSameText(s, '--verbose') then begin
-      LoggingMode := lmVerbose
-    end else
-
-    if WideSameText(s, '--ignore-errors') then begin
-      Errors := emIgnore;
-    end else
-    if WideSameText(s, '--stop-on-errors') then begin
-      Errors := emStop;
-    end else
-
-    if WideSameText(s, '--crlf-break') then begin
-      CrlfBreak := tbTrue;
-    end else
-    if WideSameText(s, '--no-crlf-break') then begin
-      CrlfBreak := tbFalse;
-    end else
-
     if IoSettings.HandleOption(@ctx, s) then begin
     end else
 
@@ -472,25 +408,6 @@ begin
     DumpTableList := ToLowercase(DumpTableList);
     DumpViewList := ToLowercase(DumpViewList);
   end;
-
- //Resolve default values depending on a type of input stream.
- //If we fail to guess the type, default to File (this can always be overriden manually!)
-  KeyboardInput := IsConsoleHandle(STD_INPUT_HANDLE) and (stdi='');
-  if Errors=emDefault then
-    if KeyboardInput then
-      Errors := emIgnore
-    else
-      Errors := emStop;
-  if LoggingMode=lmDefault then
-    if KeyboardInput then
-      LoggingMode := lmVerbose
-    else
-      LoggingMode := lmNormal;
-  if CrlfBreak=tbDefault then
-    if KeyboardInput then
-      CrlfBreak := tbTrue
-    else
-      CrlfBreak := tbFalse;
 
   IoSettings.Finalize;
 end;
