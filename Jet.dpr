@@ -926,7 +926,7 @@ begin
     fl := '';
     Multiline := false;
     for j := 0 to Length(Index.Columns) - 1 do begin
-      tmp := Index.Columns[j].Name;
+      tmp := '['+Index.Columns[j].Name+']';
       case Index.Columns[j].Collation of
         DB_COLLATION_ASC: tmp := tmp + ' ASC';
         DB_COLLATION_DESC: tmp := tmp + ' DESC';
