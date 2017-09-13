@@ -48,10 +48,10 @@ By default the tool guesses by the file name (assumes jet4x MDBs unless the exte
  * `jet touch -new -f test1.accdb` :: create a new accdb database
  * `jet dump -f test2.db --accdb` :: dump accdb database with an unusual extension
 
-Accdb format support requires [newer providers installed](Providers). The best available provider will be auto-selected, you can override this:
+Accdb format support requires [newer providers installed](Providers). The best compatible available providers will be auto-selected, you can override this:
 
- * `--oledb-eng [provider ProgID]` :: e.g. Microsoft.Jet.OLEDB.4.0
- * `--dao-eng [provider ProgID]` :: e.g. DAO.Engine.36
+ * `--oledb-eng [ProgID]` :: e.g. Microsoft.Jet.OLEDB.4.0
+ * `--dao-eng [ProgID]` :: e.g. DAO.Engine.36
 
 
 ### What to include in dumps:
@@ -104,7 +104,7 @@ If you cannot redirect input and output through the usual command-line piping yo
 Logging options:
 
   * `--silent` :: do not print anything at all
-  * `--verbose` :: echo commands which are being executed and otherwise act like a spammer
+  * `--verbose` :: echo commands which are being executed and print additional information
 
 Error handling:
 
