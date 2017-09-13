@@ -50,8 +50,8 @@ Finally, with a Connection String you can specify a lot of things by hand but th
 
 The following providers are supported by default:
 
-  * Microsoft.Jet.OLEDB.4.0 (MDB only)
-  * Microsoft.ACE.OLEDB.12.0 (MDB/ACCDB)
+  * `Microsoft.Jet.OLEDB.4.0` (MDB only)
+  * `Microsoft.ACE.OLEDB.12.0` (MDB/ACCDB)
 
 Jet.OLEDB.4.0 provider is almost universally available on Windows XP and later.
 
@@ -60,7 +60,7 @@ To access accdb databases you need ACE.OLEDB provider 12.0. It is installed with
 
 The tool auto-selects the best available provider. It prefers Jet.OLEDB.4.0 for MDB files (for compatibility) and ACE.OLEDB.12.0 for ACCDB, but will fall back to other versions if needed.
 
-To override this, pass `--oledb-eng [provider id]` (IDs listed above). You may pass unrelated OLEDB providers if you're adventurous, but some features will not work.
+To override this, pass `--oledb-eng [provider id]` (IDs are listed above). You may pass unrelated OLEDB providers if you're adventurous, but some features will not work.
 
 
 #### ACE OLEDB bitness confusion
@@ -79,8 +79,8 @@ The only way to install both bitness versions is to install, say, Office 2013 64
 
 The following DAO engines are supported:
 
-  * DAO.Engine.36 (32 bit only, MDB only)
-  * DAO.Engine.120 (32/64 bit, MDB/ACCDB)
+  * `DAO.Engine.36` (32 bit only, MDB only)
+  * `DAO.Engine.120` (32/64 bit, MDB/ACCDB)
 
 DAO.Engine.36 is almost universally present on Windows XP and later. DAO.Engine.120 may need to be installed with Office 2010 and later.
 
