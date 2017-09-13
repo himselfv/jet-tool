@@ -43,12 +43,10 @@ Database format:
   * `--accdb` :: use .accdb format
   * `--db-format [jet10 / jet11 / jet20 / jet3x / jet4x (mdb) / ace12 (accdb)]` :: precise format selection
 
-By default the tool assumes jet4x MDBs, unless the file name extension is accdb. Examples:
+By default the tool guesses by the file name (assumes jet4x MDBs unless the extension is accdb). Examples:
 
  * `jet touch -new -f test1.accdb` :: create a new accdb database
  * `jet dump -f test2.db --accdb` :: dump accdb database with an unusual extension
-
-Providers:
 
 Accdb format support requires [newer providers installed](Providers). The best available provider will be auto-selected, you can override this:
 
