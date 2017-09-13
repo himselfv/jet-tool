@@ -74,7 +74,7 @@ begin
   Result := (i < ParamCount);
   if Result then begin
     Inc(i);
-    value := ParamStr(i+1);
+    value := ParamStr(i);
   end;
 end;
 

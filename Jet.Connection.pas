@@ -278,7 +278,7 @@ Note that DAO preference needs not to follow ADO preference strictly.
 
   err('ERROR: Jet/ACE OLEDB provider not found. The operations will likely fail.');
   //Still set the most compatible provider just in case
-  Providers.OleDbEng := 'Microsoft.Jet.OLEDB.4.0';
+  Providers.OleDbEng := sOleDbProviderJet4;
 end;
 
 

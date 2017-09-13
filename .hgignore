@@ -21,3 +21,4 @@ __history
 # Intermediate files
 examples/Databases/*
 examples/Dumps/*
+examples/DbFormats/*
