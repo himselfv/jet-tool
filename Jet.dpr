@@ -184,8 +184,8 @@ begin
   err('These are only applied after the command-line parsing is over');
   err('');
   err('Jet/ACE OLEDB and DAO have several versions which are available on different platforms.');
-  err('You can override the default selection (best available + compatible):');
-  err('  --oledb-eng [provider ProgID] :: e.g. Microsoft.Jet.OLEDB.4.0');
+  err('You can override the default selection (best compatible available):');
+  err('  --oledb-eng [ProgID] :: e.g. Microsoft.Jet.OLEDB.4.0');
   err('  --dao-eng [provider ProgID] :: e.g. DAO.Engine.36');
 end;
 
