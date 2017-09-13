@@ -56,9 +56,7 @@ Accdb format support requires [newer providers installed](Providers). The best a
  * `--dao-eng [provider ProgID]` :: e.g. DAO.Engine.36
 
 
-### Dump contents
-
-What to include in dumps:
+### What to include in dumps:
 
   * `--tables` (or `--no-tables` to disable, same with the rest of dump options)
   * `--views`
@@ -99,6 +97,12 @@ If you specify none of the above options, default dump takes place:
 
 ### Misc options
 
+If you cannot redirect input and output through the usual command-line piping you can use I/O redirection options:
+
+  * `-stdi [filename]` :: input
+  * `-stdo [filename]` :: output
+  * `-stde [filename]` :: error and debug output
+
 Logging options:
 
   * `--silent` :: do not print anything at all
@@ -126,13 +130,6 @@ When the tool is unsure and thinks the input might be coming from file, these ar
 
 You can explicitly set these options via command-line in which case no guessing is made.
 
-I/O redirection:
-
-If you cannot redirect the tool input and output through the usual command-line piping you can specify redirects with these options:
-
-  * `-stdi [filename]`
-  * `-stdo [filename]`
-  * `-stde [filename]`
 
 
 ## Additional information ##
