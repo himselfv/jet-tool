@@ -19,7 +19,10 @@ uses
   DaoDumper in 'DaoDumper.pas',
   JetCommon in 'JetCommon.pas',
   AdoxDumper in 'AdoxDumper.pas',
-  JetDataFormats in 'JetDataFormats.pas';
+  JetDataFormats in 'JetDataFormats.pas',
+  Jet.IO in 'Jet.IO.pas',
+  Jet.Connection in 'Jet.Connection.pas',
+  Jet.CommandLine in 'Jet.CommandLine.pas';
 
 //{$DEFINE DUMP_CHECK_CONSTRAINTS}
 //Feature under development.
@@ -92,18 +95,6 @@ type
   TWideCharArray = array[0..16383] of WideChar;
   OemString = type AnsiString(CP_OEMCP);
 
-//Writes a string to error output.
-//All errors, usage info, hints go here. Redirect it somewhere if you don't need it.
-procedure err(msg: UniString);
-begin
-  writeln(ErrOutput, msg);
-end;
-
-//Writes a string to error output if verbose log is enabled.
-procedure log(msg: UniString); forward;
-
-type
-  EUsage = class(Exception);
 
 procedure PrintShortUsage;
 begin
@@ -189,54 +180,16 @@ begin
   err('  --dao-eng [provider ProgID] :: e.g. DAO.Engine.36');
 end;
 
-procedure BadUsage(msg: UniString='');
-begin
-  raise EUsage.Create(msg);
-end;
-
-procedure Redefined(term: string; old, new: UniString);
-begin
-  raise EUsage.Create(term+' already specified: '+old+'. Cannot process command "'+new+'".');
-end;
-
-function IsConsoleHandle(stdHandle: cardinal): boolean; forward;
 
 type
  //"Default" states are needed because some defaults are unknown until later.
  //They will be resolved before returning from ParseCommandLine.
-  TLoggingMode = (lmDefault, lmSilent, lmNormal, lmVerbose);
   TErrorHandlingMode = (emDefault, emIgnore, emStop);
   TTriBool = (tbDefault, tbTrue, tbFalse);
 
- //Multiple database formats are supported by JET/ACE providers.
-  TDatabaseFormat = (
-    dbfDefault,         //auto-select from file name, default to MDB4.0
-    dbfMdb10,           //various older versions
-    dbfMdb11,
-    dbfMdb20,
-    dbfMdb3x,
-    dbfMdb4x,           //latest MDB
-    dbfAccdb            //ACCDB
-  );
 
 var
   Command: UniString;
-
- //Providers
-  Providers: record
-    OleDbEng: UniString;        //set by user or auto-detected
-    DaoEng: UniString;          //set by user or auto-detected
-  end;
-
- //Connection
-  ConnectionString: UniString;
-  DataSourceName: UniString;
-  Filename: UniString;
-  User, Password: UniString;
-  DatabasePassword: UniString;
-  NewDb: boolean;
-  ForceNewDb: boolean;
-  DatabaseFormat: TDatabaseFormat = dbfDefault;
 
  //Database options
   CaseInsensitiveIDs: boolean;
@@ -263,15 +216,9 @@ var
   PrivateExtensions: boolean = true;
   DropObjects: boolean = true;    //add DROP commands
   CreateObjects: boolean = true;  //add CREATE commands
- //Log
-  LoggingMode: TLoggingMode = lmDefault;
+ //IO
   Errors: TErrorHandlingMode = emDefault;
- //Redirects
-  stdi, stdo, stde: UniString;
   CrlfBreak: TTriBool = tbDefault;
-
-var //Dynamic properties
-  CanUseDao: boolean; //sometimes there are other ways
 
 procedure ConfigureDumpAllSources;
 begin
@@ -318,128 +265,23 @@ begin
   SetLength(DumpDataList, 0);
 end;
 
-procedure AutodetectOleDbProvider; forward;
-
 procedure ParseCommandLine;
-var i: integer;
+var ctx: TParsingContext;
   s, list: UniString;
   KeyboardInput: boolean;
 
-  procedure Define(var Term: UniString; TermName: string; Value: UniString);
-  begin
-    if Term <> '' then
-      Redefined(TermName, Term, Value);
-    Term := Value;
-  end;
-
-  function NextParam(key, param: UniString): UniString;
-  begin
-    Inc(i);
-    if i > ParamCount then
-      BadUsage(Key+' requires specifying the '+param);
-    Result := ParamStr(i);
-  end;
-
-  //Same as NextParam, but returns false if there's no param or next param is a flag
-  //Can return true and value=='' if there's an explicitly defined empty param (that's a feature)
-  function TryNextParam(key, param: UniString; out value: UniString): boolean;
-  begin
-    if i >= ParamCount then begin
-      Result := false;
-      exit;
-    end;
-    value := ParamStr(i+1);
-    Result := not value.StartsWith('-');
-    if Result then
-      Inc(i)
-    else
-      value := '';
-  end;
-
 begin
-  i := 1;
-  while i <= ParamCount do begin
-    s := ParamStr(i);
-    if Length(s) <= 0 then begin
-      Inc(i);
+  ctx.Reset;
+  while ctx.TryNextArg(s) do begin
+    if Length(s) <= 0 then
       continue;
-    end;
 
     if s[1] <> '-' then begin
       Define(Command, 'Command', s);
     end else
 
-    if WideSameText(s, '-c') then begin
-      s := NextParam('-c', 'connection string');
-      Define(ConnectionString, 'Connection string', s);
+    if ConnectionSettings.HandleOption(@ctx, s) then begin
     end else
-    if WideSameText(s, '-dsn') then begin
-      s := NextParam('-dsn', 'data source name');
-      Define(DataSourceName, 'Data source name', s);
-    end else
-    if WideSameText(s, '-f') then begin
-      s := NextParam('-f', 'filename');
-      Define(Filename, 'Filename', s);
-    end else
-    if WideSameText(s, '-u') then begin
-      s := NextParam('-u', 'username');
-      Define(User, 'Username', s);
-    end else
-    if WideSameText(s, '-p') then begin
-      s := NextParam('-p', 'password');
-      Define(Password, 'Password', s);
-    end else
-    if WideSameText(s, '-dp') then begin
-      s := NextParam('-dp', 'database password');
-      Define(DatabasePassword, 'Database password', s);
-    end else
-
-    if WideSameText(s, '-new') then begin
-      NewDb := true;
-    end else
-    if WideSameText(s, '-force') then begin
-      ForceNewDb := true;
-    end else
-
-   //Database provider options
-    if WideSameText(s, '--oledb-eng') then begin
-      Define(Providers.OleDbEng, 'OLEDB Engine', NextParam('--oledb-eng', 'OLEDB Engine'));
-    end else
-    if WideSameText(s, '--dao-eng') then begin
-      Define(Providers.DaoEng, 'DAO Engine', NextParam('--dao-eng', 'DAO Engine'));
-    end else
-
-   //Database format
-    if WideSameText(s, '--db-format')
-    or WideSameText(s, '--database-format') then begin
-      s := NextParam('--database-format', 'format name');
-      if WideSameText(s, 'jet10') then
-        DatabaseFormat := dbfMdb10
-      else
-      if WideSameText(s, 'jet11') then
-        DatabaseFormat := dbfMdb11
-      else
-      if WideSameText(s, 'jet20') then
-        DatabaseFormat := dbfMdb20
-      else
-      if WideSameText(s, 'jet3x') then
-        DatabaseFormat := dbfMdb3x
-      else
-      if WideSameText(s, 'jet4x') then
-        DatabaseFormat := dbfMdb4x
-      else
-      if WideSameText(s, 'ace12') then
-        DatabaseFormat := dbfAccdb
-      else
-        BadUsage('Unsupported database format: '+s);
-    end else
-   //Some shortcuts
-    if WideSameText(s, '--as-mdb') then
-      DatabaseFormat := dbfMdb4x
-    else
-    if WideSameText(s, '--as-accdb') then
-      DatabaseFormat := dbfAccdb
-    else
 
    //Database options
     if WideSameText(s, '--case-sensitive-ids') then begin
@@ -453,7 +295,7 @@ begin
     if WideSameText(s, '--tables') then begin
       DumpDefaultSourceSet := false; //override default
       NeedDumpTables := true;
-      if TryNextParam('--tables', 'table list', list) then begin
+      if ctx.TryNextParam(s, 'table list', list) then begin
         DumpTableList := Split(list, ',');
         if Length(DumpTableList) <= 0 then
          //Empty DumpTableList internally means dump all, so just disable dump if asked for none
@@ -467,7 +309,7 @@ begin
     if WideSameText(s, '--views') then begin
       DumpDefaultSourceSet := false; //override default
       NeedDumpViews := true;
-      if TryNextParam('--views', 'view list', list) then begin
+      if ctx.TryNextParam(s, 'view list', list) then begin
         DumpViewList := Split(list, ',');
         if Length(DumpViewList) <= 0 then
           NeedDumpViews := false;
@@ -506,7 +348,7 @@ begin
     if WideSameText(s, '--data') then begin
       DumpDefaultSourceSet := false;
       NeedDumpData := true;
-      if TryNextParam('--data', 'table list', list) then begin
+      if ctx.TryNextParam(s, 'table list', list) then begin
         DumpDataList := Split(list, ',');
         if Length(DumpDataList) <= 0 then
          //Empty DumpDataList internally means dump all, so just disable dump if asked for none
@@ -520,8 +362,8 @@ begin
     if WideSameText(s, '--query') then begin
       DumpDefaultSourceSet := false;
       SetLength(DumpQueryList, Length(DumpQueryList)+1);
-      DumpQueryList[Length(DumpQueryList)-1].Query := NextParam('--query', 'SQL query text');
-      DumpQueryList[Length(DumpQueryList)-1].TableName := NextParam('--query', 'Table name');
+      DumpQueryList[Length(DumpQueryList)-1].Query := ctx.NextParam(s, 'SQL query text');
+      DumpQueryList[Length(DumpQueryList)-1].TableName := ctx.NextParam(s, 'Table name');
     end else
 
    //Shortcuts
@@ -592,59 +434,18 @@ begin
       CrlfBreak := tbFalse;
     end else
 
-    if WideSameText(s, '-stdi') then begin
-      s := NextParam('-stdi', 'filename');
-      Define(stdi, 'Filename', s);
-    end else
-    if WideSameText(s, '-stdo') then begin
-      s := NextParam('-stdo', 'filename');
-      Define(stdo, 'Filename', s);
-    end else
-    if WideSameText(s, '-stde') then begin
-      s := NextParam('-stde', 'filename');
-      Define(stde, 'Filename', s);
+    if IoSettings.HandleOption(@ctx, s) then begin
     end else
 
      //Default case
       BadUsage('Unsupported option: '+s);
 
-    Inc(i);
-    continue;
   end;
 
  //If asked for help, there's nothing to check
   if WideSameText(Command, 'help') then exit;
 
- //Check params, only one is allowed: ConnectionString, ConnectionName, Filename
-  i := 0;
-  if ConnectionString<>'' then Inc(i);
-  if DataSourceName<>'' then Inc(i);
-  if Filename<>'' then Inc(i);
-  if i > 1 then BadUsage('Only one source (ConnectionString/DataSourceName/Filename) can be specified.');
-  if i < 1 then BadUsage('A source (ConnectionString/DataSourceName/Filename) needs to be specified.');
-
- //With ConnectionString, additional params are disallowed: everything is in.
-  if (ConnectionString<>'') and (DatabasePassword<>'') then
-    BadUsage('ConnectionString conflicts with DatabasePassword: this should be included inside of the connection string.');
-
- //If requested to create a db, allow only filename connection.
-  if NewDb and (Filename='') then
-    BadUsage('Database creation is supported only when connecting by Filename.');
-  if NewDb and (WideSameText(Command, 'dump')
-    or WideSameText(Command, 'schema') or WideSameText(Command, 'daoschema')
-    or WideSameText(Command, 'adoxschema'))
-  and (LoggingMode=lmVerbose) then begin
-    err('NOTE: You asked to create a database and then dump its contents.');
-    err('What the hell are you trying to do?');
-  end;
-  if ForceNewDb and not NewDb then
-    BadUsage('-force requires -new');
-
-  if NewDb and not ForceNewDb and FileExists(Filename) then
-    raise Exception.Create('File '+Filename+' already exists. Use -force with -new to overwrite.');
-
- //Whether we can use DAO. If not, prefer other options.
-  CanUseDao := (Filename<>'');
+  ConnectionSettings.Finalize;
 
  //To parse comments we need DAO, i.e. filename connection
   if WideSameText(Command, 'exec') and HandleComments then begin
@@ -654,28 +455,13 @@ begin
       BadUsage('You cannot use ConnectionString source with --comments when doing "exec"');
   end;
 
- //Auto-enable accdb by file name (if not explicitly disable)
-  if (DatabaseFormat = dbfDefault) and (ExtractFileExt(Filename) = '.accdb') then
-    DatabaseFormat := dbfAccdb;
- //We can't auto-enable Accdb in other cases (connection string / data source name),
- //so force it with --accdb if it matters.
-
- //To build a ConnectionString we need to select an OLEDB provider.
- //We can't delay it until first use because ConnectionString is needed both by ADO and ADOX.
-  if Providers.OleDbEng = '' then
-    AutoDetectOleDbProvider();
- //On the other hand, DAO detection can be safely delayed until first use.
-
- //Convert all sources to ConnectionStrings
-  if Filename<>'' then
-    ConnectionString := 'Provider='+Providers.OleDbEng+';Data Source="'+Filename+'";'
-  else
-  if DataSourceName <> '' then
-    ConnectionString := 'Provider='+Providers.OleDbEng+';Data Source="'+DataSourceName+'";';
-
-  if DatabasePassword<>'' then
-   //Thankfully the parameter name has not been changed in ACE 12.0
-    ConnectionString := ConnectionString + 'Jet OLEDB:Database Password="'+DatabasePassword+'";';
+  if NewDb and (WideSameText(Command, 'dump')
+    or WideSameText(Command, 'schema') or WideSameText(Command, 'daoschema')
+    or WideSameText(Command, 'adoxschema'))
+  and (LoggingMode=lmVerbose) then begin
+    err('NOTE: You asked to create a database and then dump its contents.');
+    err('What the hell are you trying to do?');
+  end;
 
  //If no modifications have been made, dump default set of stuff
   if DumpDefaultSourceSet then
@@ -705,292 +491,12 @@ begin
       CrlfBreak := tbTrue
     else
       CrlfBreak := tbFalse;
+
+  IoSettings.Finalize;
 end;
 
 
 
-function CLSIDFromProgID(const ProgID: UniString; out clsid: TGUID): boolean;
-var hr: HRESULT;
-begin
-  hr := ActiveX.CLSIDFromProgID(PChar(ProgID), clsid);
-  Result := SUCCEEDED(hr);
-  if not Result then
-    log('Trying class '+ProgID+'... not found.');
-end;
-
-//Automatically detects which supported OLEDB Jet providers are available and chooses one.
-//Called if the user has not specified a provider explicitly.
-procedure AutodetectOleDbProvider;
-var clsid: TGUID;
-const
-  sOleDbProviderJet4: string = 'Microsoft.Jet.OLEDB.4.0';
-  sOleDbProviderAce12: string = 'Microsoft.ACE.OLEDB.12.0';
-begin
-(*
-Different providers support different sets of database formats:
-  Jet 4.0 supports Jet11-Jet4x (MDB), but not Ace12 (ACCDB)
-  ACE 12  supports Ace12 (ACCDB)
-
-ACE also supports Jet11-Jet4x, but it's complicated:
-* some features reportedly work differently, notably some field types and user/password support.
-* ACE14+ deprecates Jet11-Jet20
-
-Jet 4.0 is almost universally available anyway, so we'll prefer it for older DB types,
-and prefer ACE 12 for accdb.
-
-Note that DAO preference needs not to follow ADO preference strictly.
-*)
-
- //For Accdb, try ACE12 first
-  if DatabaseFormat = dbfAccdb then
-    if CLSIDFromProgID(sOleDbProviderAce12, clsid) then begin
-      Providers.OleDbEng := sOleDbProviderAce12;
-      exit;
-    end;
-
- //Try Jet 4.0
-  if CLSIDFromProgID(sOleDbProviderJet4, clsid) then begin
-    Providers.OleDbEng := sOleDbProviderJet4;
-    if DatabaseFormat = dbfAccdb then
-      //We have found something, but it's not ACE12
-      err('ERROR: ACCDB format requires Microsoft.ACE.OLEDB.12.0 provider which has not been found. The operations will likely fail.');
-    exit;
-  end;
-
- //For MDBs try ACE12 as a last resort
-  if DatabaseFormat <> dbfAccdb then
-    if CLSIDFromProgID(sOleDbProviderAce12, clsid) then begin
-      Providers.OleDbEng := sOleDbProviderAce12;
-      log('NOTE: Fallback to ACE12 for older database access may introduce some inconsistencies.');
-      exit;
-    end;
-
-  err('ERROR: Jet/ACE OLEDB provider not found. The operations will likely fail.');
-  //Still set the most compatible provider just in case
-  Providers.OleDbEng := 'Microsoft.Jet.OLEDB.4.0';
-end;
-
-
-const
-  JetEngineType_Jet10 = 1;
-  JetEngineType_Jet11 = 2;
-  JetEngineType_Jet20 = 3;
-  JetEngineType_Jet3x = 4;
-  JetEngineType_Jet4x = 5;
-  JetEngineType_Ace12 = 6;  //confirmed
-  //Some other known types:
-  // DBASE3 = 10;
-  // Xslx = 30 / 37 in some examples.
-
-var
-  AdoxCatalog: Catalog;
-
-//Creates a new database and resets a database-creation-required flag.
-procedure CreateNewDatabase;
-var engType: integer;
-begin
-  if ForceNewDb and FileExists(Filename) then
-    DeleteFileW(PWideChar(Filename));
-
-  case DatabaseFormat of
-    dbfMdb10: engType := JetEngineType_Jet10;
-    dbfMdb11: engType := JetEngineType_Jet11;
-    dbfMdb20: engType := JetEngineType_Jet20;
-    dbfMdb3x: engType := JetEngineType_Jet3x;
-    dbfMdb4x: engType := JetEngineType_Jet4x;
-    dbfAccdb: engType := JetEngineType_Ace12;
-  else
-   //By default, create Jet4x MDB
-    engType := JetEngineType_Jet4x;
-  end;
-
-  AdoxCatalog := CoCatalog.Create;
-  AdoxCatalog.Create(ConnectionString
-    + 'Jet OLEDB:Engine Type='+IntToStr(engType)+';');
-  if LoggingMode=lmVerbose then
-    writeln('Database created.');
-  NewDb := false; //works only once
-end;
-
-function GetAdoConnection: _Connection; forward;
-
-//Returns an ADOX Catalog. Caching is implemented.
-function GetAdoxCatalog: Catalog;
-begin
-  if AdoxCatalog=nil then begin
-    AdoxCatalog := CoCatalog.Create;
-    AdoxCatalog._Set_ActiveConnection(GetAdoConnection);
-  end;
-  Result := AdoxCatalog;
-end;
-
-
-var
-  AdoConnection: _Connection;
-
-//Returns a NEW ADO connection.
-function EstablishAdoConnection: _Connection;
-begin
-  if NewDb then CreateNewDatabase;
-  Result := CoConnection.Create;
-  Result.Open(ConnectionString, User, Password, 0);
-end;
-
-//Returns an ADO connection. Caching is implemented
-function GetAdoConnection: _Connection;
-begin
-  if NewDb then CreateNewDatabase;
-  if AdoConnection=nil then begin
-    Result := EstablishAdoConnection;
-    AdoConnection := Result;
-  end else
-    Result := AdoConnection;
-end;
-
-
-var
-  DaoConnection: Database = nil;
-  Dao: record
-    SupportState: (
-      ssUntested,
-      ssDetected,           //ProviderCLSID is valid
-      ssUnavailable         //No DAO provider or DAO disabled by connection type
-      );
-    ProviderCLSID: TGUID;
-  end = (SupportState: ssUntested);
-
-//These are not used and are provided only for information. We query the registry by ProgIDs.
-const
-  CLASS_DAO36_DBEngine_x86 = '{00000100-0000-0010-8000-00AA006D2EA4}'; //no x64 version exists
-  CLASS_DAO120_DBEngine = '{CD7791B9-43FD-42C5-AE42-8DD2811F0419}'; //both x64 and x86
-
-//Automatically detects which supported DAO providers are available and chooses one,
-//or finds the provider the user has specified.
-procedure AutodetectDao;
-const
-  sDaoEngine36 = 'DAO.DBEngine.36';
-  sDaoEngine120 = 'DAO.DBEngine.120';
-begin
- //If explicit DAO provider is set, simply convert it to CLSID.
-  if Providers.DaoEng <> '' then begin
-    if not CLSIDFromProgID(Providers.DaoEng, Dao.ProviderCLSID) then
-     //Since its explicitly configured, we should raise
-      raise Exception.Create('Cannot find DAO provider with ProgID='+Providers.DaoEng);
-    Dao.SupportState := ssDetected;
-    exit;
-  end;
-
-(*
-  As with ADO, prefer older DAO for older database types, and newer DAO for ACCDB.
-  DAO preference needs not to be strictly in sync with Jet preference:
-     OLEDB engine: Jet4.0,  DAO engine: DAO120    <-- this is okay (if both can handle the file)
-*)
-
-  //For ACCDB try DAO120 first
-  if DatabaseFormat = dbfAccdb then
-    if CLSIDFromProgID(sDaoEngine120, Dao.ProviderCLSID) then begin
-      Providers.DaoEng := sDaoEngine120;
-      Dao.SupportState := ssDetected;
-      exit;
-    end;
-
-  //DAO36
-  if CLSIDFromProgID(sDaoEngine36, Dao.ProviderCLSID) then begin
-    Providers.DaoEng := sDaoEngine36;
-    Dao.SupportState := ssDetected;
-    if DatabaseFormat = dbfAccdb then
-      err('WARNING: ACCDB format requires DAO.DBEngine.120 provider which is not found. DAO operations will probably fail.');
-    exit;
-  end;
-
-  if DatabaseFormat <> dbfAccdb then
-    if CLSIDFromProgID(sDaoEngine120, Dao.ProviderCLSID) then begin
-      Providers.DaoEng := sDaoEngine120;
-      Dao.SupportState := ssDetected;
-      log('NOTE: Fallback to DAO120 for older database access may introduce some inconsistencies.');
-      exit;
-    end;
-
-  err('WARNING: No compatible DAO provider found. DAO operations will be unavailable.');
- {$IFDEF CPUX64}
-  err('  Note that this X64 build of jet-tool cannot use 32-bit only DAO.DBEngine.36 even if it''s installed. '
-    +'You need DAO.DBEngine.120 which is included in "Microsoft Office 12.0 Access Database Engine Objects Library" and later.');
- {$ENDIF}
-  Dao.SupportState := ssUnavailable;
-end;
-
-resourcestring
-  sDaoUnavailable =
-    'The operation you''re trying to perform requires DAO. No supported DAO providers have been detected.'
-  + 'This tool requires either DAO.DBEngine.120 or DAO.DBEngine.36.'#13
-  + 'Install the required DAO providers, override DAO provider selection or disable the features that require DAO.';
-  sDaoConnectionTypeWrong =
-    'The operation you''re trying to perform requires DAO. DAO and DAO-dependent functions can only be '
-  + 'accessed through Filename source.'#13
-  + 'Somehow this condition was not properly verified during command-line parsing. '
-  + 'Please file a bug to the developers.'#13
-  + 'For the time being, disable the setting that required DAO (usually something obscure like importing '
-  + 'comments) or switch to connecting through Filename.';
-
-
-//Establishes a NEW DAO connection. Also refreshes the engine cache.
-//Usually called every time DAO connection is needed by a DAO-dependent proc.
-function EstablishDaoConnection: Database;
-var DaoEngine: _DbEngine;
-  Params: OleVariant;
-begin
-  if NewDb then CreateNewDatabase;
-
-  //Figure out supported DAO engine and its CLSID
-  if Dao.SupportState = ssUntested then
-    AutodetectDao();
-  if Dao.SupportState = ssUnavailable then
-    //Since we're here, someone tried to use Dao functions anyway. Raise!
-    raise Exception.Create(sDaoUnavailable);
-
- //Doing the same as this would, only with variable CLSID:
- //  DaoEngine := CoDbEngine.Create;
-  DaoEngine := CreateComObject(Dao.ProviderCLSID) as DBEngine;
-
- //Do not disable, or Dao refreshing will break too
-  DaoEngine.Idle(dbRefreshCache);
-
-  if Filename<>'' then begin
-    if DatabasePassword<>'' then
-      Params := UniString('MS Access;pwd=')+DatabasePassword
-    else
-      Params := '';
-    Result := DaoEngine.OpenDatabase(Filename, False, False, Params);
-  end else
-  if DataSourceName<>'' then begin
-   //Although this will probably not work
-    Params := 'ODBC;DSN='+DataSourceName+';UID='+User+';PWD='+Password+';';
-    Result := DaoEngine.OpenDatabase('', False, False, Params);
-  end else
-    raise Exception.Create(sDaoConnectionTypeWrong);
-end;
-
-//Returns a DAO connection. Caching is implemented.
-function GetDaoConnection: Database;
-begin
-  if Assigned(DaoConnection) then begin
-    Result := DaoConnection;
-    exit;
-  end;
-  Result := EstablishDaoConnection;
-  DaoConnection := Result;
-end;
-
-
-
-
-//This is needed before you CoUninitialize Ole. More notes where this is called.
-procedure ClearOleObjects;
-begin
-  AdoConnection := nil;
-  DaoConnection := nil;
-  AdoxCatalog := nil;
-end;
 
 ////////////////////////////////////////////////////////////////////////////////
 /// Touch --- establishes connection and quits
@@ -1072,7 +578,7 @@ end;
 procedure PrintAdoxSchema();
 begin
   AdoxDumper.PrintAdoxSchema(GetAdoxCatalog);
-  GetAdoxcatalog.Tables[0].Properties
+  GetAdoxCatalog.Tables[0].Properties
 end;
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1086,8 +592,7 @@ end;
 procedure Warning(msg: UniString);
 begin
   writeln('/* !!! Warning: '+msg+' */');
-  if LoggingMode<>lmSilent then
-    err('Warning: '+msg);
+  warn('Warning: '+msg);
 end;
 
 
@@ -2258,8 +1763,7 @@ procedure jetSetTableComment(TableName: UniString; Comment: UniString);
 var dao: Database;
   td: TableDef;
 begin
-  if LoggingMode=lmVerbose then
-    writeln('Table '+TableName+' comment '+Comment);
+  verbose('Table '+TableName+' comment '+Comment);
   dao := EstablishDaoConnection;
   dao.TableDefs.Refresh;
   td := dao.TableDefs[TableName];
@@ -2270,8 +1774,7 @@ procedure jetSetFieldComment(TableName, FieldName: UniString; Comment: UniString
  var dao: Database;
    td: TableDef;
 begin
-  if LoggingMode=lmVerbose then
-    writeln('Table '+TableName+' field '+FieldName+' comment '+Comment);
+  verbose('Table '+TableName+' field '+FieldName+' comment '+Comment);
   dao := EstablishDaoConnection;
   dao.TableDefs.Refresh;
   td := dao.TableDefs[TableName];
@@ -2282,8 +1785,7 @@ procedure jetSetProcedureComment(ProcedureName: UniString; Comment: UniString);
 var dao: Database;
   td: QueryDef;
 begin
-  if LoggingMode=lmVerbose then
-    writeln('Procedure '+ProcedureName+' comment '+Comment);
+  verbose('Procedure '+ProcedureName+' comment '+Comment);
   dao := EstablishDaoConnection;
   dao.QueryDefs.Refresh;
   td := dao.QueryDefs[ProcedureName];
@@ -2404,51 +1906,11 @@ end;
 
 ////////////////////////////////////////////////////////////////////////////////
 
-//Leaks file handles! By design. We don't care, they'll be released on exit anyway.
-procedure RedirectIo(nStdHandle: dword; filename: UniString);
-var hFile: THandle;
-begin
-  if nStdHandle=STD_INPUT_HANDLE then
-    hFile := CreateFileW(PWideChar(Filename), GENERIC_READ, FILE_SHARE_READ,
-      nil, OPEN_EXISTING, 0, 0)
-  else
-    hFile := CreateFileW(PWideChar(Filename), GENERIC_WRITE, 0,
-      nil, OPEN_ALWAYS, 0, 0);
-  if hFile=INVALID_HANDLE_VALUE then
-    RaiseLastOsError();
-  SetStdHandle(nStdHandle, hFile);
-end;
-
-//Returns true when a specified STD_HANDLE actually points to a console object.
-//It's a LUCKY / UNKNOWN type situation: if it does, we're lucky and assume
-//keyboard input. If it doesn't, we don't know: it might be a file or a pipe
-//to another console.
-function IsConsoleHandle(stdHandle: cardinal): boolean;
-begin
- //Failing GetFileType/GetStdHandle is fine, we'll return false.
-  Result := (GetFileType(GetStdHandle(stdHandle))=FILE_TYPE_CHAR);
-end;
-
-procedure log(msg: UniString);
-begin
-  if LoggingMode = lmVerbose then
-    err(msg);
-end;
-
-
 
 begin
   try
     CoInitializeEx(nil, COINIT_MULTITHREADED);
     ParseCommandLine;
-
-   //Redirects
-    if stdi<>'' then
-      RedirectIo(STD_INPUT_HANDLE, stdi);
-    if stdo<>'' then
-      RedirectIo(STD_OUTPUT_HANDLE, stdo);
-    if stde<>'' then
-      RedirectIo(STD_OUTPUT_HANDLE, stde);
 
     if WideSameText(Command, 'touch') then
       Touch()
@@ -2476,7 +1938,7 @@ begin
     else
       BadUsage('Unsupported command: '+Command);
     ClearOleObjects(); //or else it'll stay till finalization when Ole is long gone.
-   //Also it's paramount that we nil it inside of the function: Delphi will not
+   //Also it's paramount that we nil it inside of some function: Delphi will not
    //actually derefcount it until we exit the scope of where we nil it.
     CoUninitialize();
   except
