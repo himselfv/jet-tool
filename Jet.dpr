@@ -130,16 +130,16 @@ begin
   err('  -u [user]');
   err('  -p [password]');
   err('  -dp [database password]'); {Works fine with database creation too}
-  err('  -new :: create new database (works only by filename)');
+  err('  -new :: create a new database (works only by file name)');
   err('  -force :: overwrite existing database (requires -new)');
   err('You cannot use -c with --comments when executing (dumping is fine).');
  (* -dsn will probably not work with --comments too, as long as it really is MS Access DSN. They deny DAO DSN connections. *)
   err('');
-  err('Database format is auto-guessed, you can override:');
-  err('  --mdb :: use older Jet 4.0 .mdb format (default)');
-  err('  --accdb :: use newer .accdb format');
+  err('Database format:');
+  err('  --mdb :: use Jet 4.0 .mdb format (default)');
+  err('  --accdb :: use .accdb format');
   err('  --db-format [jet10 / jet11 / jet20 / jet3x / jet4x (mdb) / ace12 (accdb)]');
-  err('By default we read any format and create jet4x MDBs, unless the file name extension is accdb.');
+  err('By default the tool guesses by the file name (assumes jet4x MDBs unless the extension is accdb).');
   err('');
   err('What to include in the dump:');
   err('  --tables, --no-tables');
