@@ -41,7 +41,7 @@ var //Dynamic properties
 type
   TConnectionSettingsParser = class(TCommandLineParser)
   public
-    procedure ShowHelp; override;
+    procedure PrintUsage; override;
     function HandleOption(ctx: PParsingContext; const s: UniString): boolean; override;
     procedure Finalize; override;
   end;
@@ -66,7 +66,7 @@ uses SysUtils, Windows, ActiveX, ComObj, AdoInt, Jet.IO;
 
 procedure AutodetectOleDbProvider; forward;
 
-procedure TConnectionSettingsParser.ShowHelp;
+procedure TConnectionSettingsParser.PrintUsage;
 begin
   err('Connection params:');
   err('  -f [file.mdb] :: open a jet database file (preferred)');

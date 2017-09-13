@@ -19,6 +19,20 @@ var
   Errors: TErrorHandlingMode = emDefault;
   CrlfBreak: TTriBool = tbDefault;
 
+type
+  TIoSettingsParser = class(TCommandLineParser)
+  protected
+   //I/O Redirects
+    stdi, stdo, stde: UniString;
+  public
+    procedure PrintUsage; override;
+    function HandleOption(ctx: PParsingContext; const s: UniString): boolean; override;
+    procedure Finalize; override;
+  end;
+
+var
+  IoSettings: TIoSettingsParser;
+
 
 //Writes a string to error output.
 //All errors, usage info, hints go here. Redirect it somewhere if you don't need it.
@@ -32,48 +46,10 @@ procedure log(msg: UniString);
 procedure verbose(msg: UniString);
 
 
-type
-  TIoSettingsParser = class(TCommandLineParser)
-  protected
-   //I/O Redirects
-    stdi, stdo, stde: UniString;
-  public
-    procedure ShowHelp; override;
-    function HandleOption(ctx: PParsingContext; const s: UniString): boolean; override;
-    procedure Finalize; override;
-  end;
-
-var
-  IoSettings: TIoSettingsParser;
-
 implementation
 uses SysUtils;
 
-procedure err(msg: UniString);
-begin
-  writeln(ErrOutput, msg);
-end;
-
-procedure warn(msg: UniString);
-begin
-  if LoggingMode<>lmSilent then
-    err(msg);
-end;
-
-procedure log(msg: UniString);
-begin
-  if LoggingMode = lmVerbose then
-    err(msg);
-end;
-
-procedure verbose(msg: UniString);
-begin
-  if LoggingMode = lmVerbose then
-    err(msg);
-end;
-
-
-procedure TIoSettingsParser.ShowHelp;
+procedure TIoSettingsParser.PrintUsage;
 begin
   err('What to do with errors when executing:');
   err('  --silent :: do not print anything at all');
@@ -188,6 +164,31 @@ begin
     RedirectIo(STD_OUTPUT_HANDLE, stdo);
   if stde<>'' then
     RedirectIo(STD_OUTPUT_HANDLE, stde);
+end;
+
+
+
+procedure err(msg: UniString);
+begin
+  writeln(ErrOutput, msg);
+end;
+
+procedure warn(msg: UniString);
+begin
+  if LoggingMode<>lmSilent then
+    err(msg);
+end;
+
+procedure log(msg: UniString);
+begin
+  if LoggingMode = lmVerbose then
+    err(msg);
+end;
+
+procedure verbose(msg: UniString);
+begin
+  if LoggingMode = lmVerbose then
+    err(msg);
 end;
 
 

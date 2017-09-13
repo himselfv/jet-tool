@@ -115,7 +115,7 @@ begin
   err('  jet adoxschema :: output ADOX schema report');
   err('');
 
-  ConnectionSettings.ShowHelp;
+  ConnectionSettings.PrintUsage;
 
   err('What to include in the dump:');
   err('  --tables, --no-tables');
@@ -145,7 +145,7 @@ begin
   err('  --no-private-extensions, --private-extensions :: disables dumping/parsing private extensions (see help)');
   err('');
 
-  IoSettings.ShowHelp;
+  IoSettings.PrintUsage;
 end;
 
 

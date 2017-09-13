@@ -1,4 +1,7 @@
 unit Jet.CommandLine;
+{
+Command line parsing home.
+}
 
 interface
 uses SysUtils, UniStrUtils;
@@ -34,7 +37,7 @@ type
 
   TCommandLineParser = class
   public
-    procedure ShowHelp; virtual;
+    procedure PrintUsage; virtual;
     procedure Reset; virtual;
     function HandleOption(ctx: PParsingContext; const s: UniString): boolean; virtual;
     procedure Finalize; virtual;
@@ -101,7 +104,7 @@ begin
 end;
 
 
-procedure TCommandLineParser.ShowHelp;
+procedure TCommandLineParser.PrintUsage;
 begin
   //Override to output help for the options covered
 end;
