@@ -94,17 +94,40 @@ begin
 end;
 
 
-procedure PrintAdoxColumn(f: Column);
+{
+Not all Column object properties are available in all contexts.
+Index and Key columns only support:
+ - Name
+ - SortOrder (if Index)
+ - RelatedColumn (if Key)
+
+Table columns do not support:
+ - SortOrder
+ - RelatedColumn
+
+Tested in Jet 4.0 and ACE12 from Office 2010.
+}
+type
+  TColumnMode = (cmTable, cmIndex, cmKey);
+
+procedure PrintAdoxColumn(f: Column; mode: TColumnMode);
 begin
   writeln('Name: ', f.Name);
-  writeln('Attributes: ', f.Attributes);
-  writeln('DefinedSize: ', f.DefinedSize);
-  writeln('NumericScale: ', f.NumericScale);
-  writeln('Precision: ', f.Precision);
-  writeln('RelatedColumn: ', f.RelatedColumn);
-  writeln('SortOrder: ', f.SortOrder);
-  writeln('Type: ', f.type_);
-  DumpAdoxProperties(f.Properties, PropNames([]));
+  if not (mode in [cmIndex, cmKey]) then begin
+    writeln('Attributes: ', f.Attributes);
+    writeln('DefinedSize: ', f.DefinedSize);
+    writeln('NumericScale: ', f.NumericScale);
+    writeln('Precision: ', f.Precision);
+    writeln('Type: ', f.type_);
+  end;
+
+  if not (mode in [cmTable, cmKey]) then
+    writeln('SortOrder: ', f.SortOrder);
+  if not (mode in [cmTable, cmIndex]) then
+    writeln('RelatedColumn: ', f.RelatedColumn);
+
+  if not (mode in [cmIndex, cmKey]) then
+    DumpAdoxProperties(f.Properties, PropNames([]));
 end;
 
 procedure PrintAdoxIndex(f: Index);
@@ -115,9 +138,9 @@ begin
   DumpAdoxProperties(f.Properties, PropNames([]));
   writeln('');
 
-  writeln('Columns');
   for i := 0 to f.Columns.Count - 1 do try
-    PrintAdoxColumn(f.Columns[i]);
+    writeln('Index column ['+IntToStr(i)+']:');
+    PrintAdoxColumn(f.Columns[i], cmIndex);
     writeln('');
   except
     on E: EOleException do
@@ -136,9 +159,9 @@ begin
   writeln('UpdateRule: ', f.UpdateRule);
   writeln('');
 
-  writeln('Columns');
   for i := 0 to f.Columns.Count - 1 do try
-    PrintAdoxColumn(f.Columns[i]);
+    writeln('Key column ['+IntToStr(i)+']:');
+    PrintAdoxColumn(f.Columns[i], cmKey);
     writeln('');
   except
     on E: EOleException do
@@ -155,17 +178,17 @@ begin
   DumpAdoxProperties(f.Properties, PropNames([]));
   writeln('');
 
-  Subsection('Columns');
   for i := 0 to f.Columns.Count - 1 do try
-    PrintAdoxColumn(f.Columns[i]);
+    Subsection('Column['+IntToStr(i)+']');
+    PrintAdoxColumn(f.Columns[i], cmTable);
     writeln('');
   except
     on E: EOleException do
       writeln(E.Classname + ': ' + E.Message+''#13#10);
   end;
 
-  Subsection('Indexes');
   for i := 0 to f.Indexes.Count - 1 do try
+    Subsection('Index['+IntToStr(i)+']');
     PrintAdoxIndex(f.Indexes[i]);
     writeln('');
   except
@@ -173,8 +196,8 @@ begin
       writeln(E.Classname + ': ' + E.Message+''#13#10);
   end;
 
-  Subsection('Keys');
   for i := 0 to f.Keys.Count - 1 do try
+    Subsection('Key['+IntToStr(i)+']');
     PrintAdoxKey(f.Keys[i]);
     writeln('');
   except
