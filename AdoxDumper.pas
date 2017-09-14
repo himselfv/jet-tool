@@ -12,7 +12,63 @@ uses SysUtils, ComObj, ADOX_TLB, JetCommon;
 
 procedure PrintAdoxSchema(adox: Catalog);
 
+function AdoxDataTypeToStr(const t: DataTypeEnum): string;
+function AdoxKeyTypeToStr(const t: KeyTypeEnum): string;
+function AdoxRuleTypeToStr(const t: RuleEnum): string;
+
 implementation
+
+function AdoxDataTypeToStr(const t: DataTypeEnum): string;
+begin
+  case t of
+    adEmpty: Result := 'Empty';
+    adTinyInt: Result := 'TinyInt';
+    adSmallInt: Result := 'SmallInt';
+    adInteger: Result := 'Integer';
+    adBigInt: Result := 'BigInt';
+    adUnsignedTinyInt: Result := 'UnsignedTinyInt';
+    adUnsignedSmallInt: Result := 'UnsignedSmallInt';
+    adUnsignedInt: Result := 'UnsignedInt';
+    adUnsignedBigInt: Result := 'UnsignedBigInt';
+    adSingle: Result := 'Single';
+    adDouble: Result := 'Double';
+    adCurrency: Result := 'Currency';
+    adDecimal: Result := 'Decimal';
+    adNumeric: Result := 'Numeric';
+    adBoolean: Result := 'Boolean';
+    adError: Result := 'Error';
+    adUserDefined: Result := 'UserDefined';
+    adVariant: Result := 'Variant';
+    adIDispatch: Result := 'IDispatch';
+    adIUnknown: Result := 'IUnknown';
+    adGUID: Result := 'GUID';
+    adDate: Result := 'Date';
+    adDBDate: Result := 'DBDate';
+    adDBTime: Result := 'DBTime';
+    adDBTimeStamp: Result := 'DBTimeStamp';
+    adBSTR: Result := 'BSTR';
+    adChar: Result := 'Char';
+    adVarChar: Result := 'VarChar';
+    adLongVarChar: Result := 'LongVarChar';
+    adWChar: Result := 'WChar';
+    adVarWChar: Result := 'VarWChar';
+    adLongVarWChar: Result := 'LongVarWChar';
+    adBinary: Result := 'Binary';
+    adVarBinary: Result := 'VarBinary';
+    adLongVarBinary: Result := 'LongVarBinary';
+    adChapter: Result := 'Chapter';
+    adFileTime: Result := 'FileTime';
+    adPropVariant: Result := 'PropVariant';
+    adVarNumeric: Result := 'VarNumeric';
+  else Result := '';
+  end;
+
+  if Result <> '' then
+    Result := Result + ' (' + IntToStr(t) + ')'
+  else
+    Result := IntToStr(t);
+end;
+
 
 type
   TPropertyNames = array of WideString;
@@ -114,11 +170,11 @@ procedure PrintAdoxColumn(f: Column; mode: TColumnMode);
 begin
   writeln('Name: ', f.Name);
   if not (mode in [cmIndex, cmKey]) then begin
+    writeln('Type: ', AdoxDataTypeToStr(f.type_));
     writeln('Attributes: ', f.Attributes);
     writeln('DefinedSize: ', f.DefinedSize);
     writeln('NumericScale: ', f.NumericScale);
     writeln('Precision: ', f.Precision);
-    writeln('Type: ', f.type_);
   end;
 
   if not (mode in [cmTable, cmKey]) then
@@ -148,15 +204,37 @@ begin
   end;
 end;
 
+
+function AdoxKeyTypeToStr(const t: KeyTypeEnum): string;
+begin
+  case t of
+    adKeyPrimary: Result := 'Primary key';
+    adKeyForeign: Result := 'Foreign key';
+    adKeyUnique: Result := 'Unique key';
+  else Result := 'Unknown ('+IntToStr(t)+')';
+  end;
+end;
+
+function AdoxRuleTypeToStr(const t: RuleEnum): string;
+begin
+  case t of
+    adRINone: Result := 'Do nothing';
+    adRICascade: Result := 'Cascade';
+    adRISetNull: Result := 'Set Null';
+    adRISetDefault: Result := 'Set Default';
+  else Result := 'Unknown action ('+IntToStr(t)+')';
+  end;
+end;
+
 procedure PrintAdoxKey(f: Key);
 var i: integer;
 begin
  (* [no Properties] *)
   writeln('Name: ', f.Name);
-  writeln('DeleteRule: ', f.DeleteRule);
-  writeln('Type: ', f.Type_);
+  writeln('Type: ', AdoxKeyTypeToStr(f.Type_));
+  writeln('UpdateRule: ', AdoxRuleTypeToStr(f.UpdateRule));
+  writeln('DeleteRule: ', AdoxRuleTypeToStr(f.DeleteRule));
   writeln('RelatedTable: ', f.RelatedTable);
-  writeln('UpdateRule: ', f.UpdateRule);
   writeln('');
 
   for i := 0 to f.Columns.Count - 1 do try
