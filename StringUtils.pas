@@ -292,6 +292,11 @@ function RemoveParts(s: UniString; mk: TMarker; IgnoreBlocks: TMarkers): string;
 var ps, pc, pe: PWideChar;
   ctype: integer;
 
+  //True when after the last block we've appended to Result, there have been blocks that we have skipped.
+  //We'll need to ensure there's at least 1 space before the next block.
+  lastPartSkipped: boolean;
+
+  //Appends the block of characters from pc to pe to Result
   procedure appendResult(pc, pe: PWideChar);
   begin
    //Leave one or zero spaces at the start
@@ -302,7 +307,8 @@ var ps, pc, pe: PWideChar;
         while pc^=' ' do Inc(pc);
         Dec(pc);
       end else //no spaces at all
-        if Result <> '' then
+        //Ensure at least one space where we took out blocks (or we'll lump unrelated things together)
+        if (Result <> '') and lastPartSkipped then
           Result := Result + ' ';
 
    //One space at most at the end
@@ -316,11 +322,16 @@ var ps, pc, pe: PWideChar;
 
    //Copy
     Result := Result + SubStr(pc, pe);
+
+   //We have added something, so the last part has not been skipped
+    lastPartSkipped := false;
   end;
 
 begin
   Result := '';
   if s = '' then exit;
+
+  lastPartSkipped := false;
 
   ps := @s[1];
   ctype := WStrPosOrCommentI(ps, PWideChar(mk.s), IgnoreBlocks, pc);
@@ -328,6 +339,8 @@ begin
     if ctype>=0 then begin
      //It's an IgnoreBlock    
       pe := WStrPosEnd(pc, IgnoreBlocks, IgnoreBlocks[ctype]);
+
+      //Incomplete block, treat as plaintext
       if (pe=nil) and not (mfEOFEnds in IgnoreBlocks[ctype].f) then begin
         appendResult(ps, WStrEnd(ps));
         exit;
@@ -343,6 +356,8 @@ begin
     end else begin
      //It's a DeleteBlock
       pe := WStrPosEnd(pc, IgnoreBlocks, mk);
+
+      //Incomplete block, treat as plaintext
       if (pe=nil) and not (mfEOFEnds in mk.f) then begin
         appendResult(ps, WStrEnd(ps));
         exit;
@@ -352,6 +367,9 @@ begin
       if mfKeepOp in mk.f then
         Inc(pc, Length(mk.s));
       appendResult(ps, pc);
+
+     //Set the skipped flag so that we add spaces as neccessary later
+      lastPartSkipped := true;
 
      //Next part
       if pe = nil then //ended with EOF
