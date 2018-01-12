@@ -31,8 +31,10 @@ begin
       DecimalSeparator := '.';
       DateSeparator := '-';
       TimeSeparator := ':';
-      ShortDateFormat := 'mm-dd-yyyy hh:nn:ss';
-      LongDateFormat := 'mm-dd-yyyy hh:nn:ss';
+      ShortDateFormat := 'mm-dd-yyyy';
+      LongDateFormat := 'mm-dd-yyyy';
+      ShortTimeFormat := 'hh:nn:ss';
+      LongTimeFormat := 'hh:nn:ss';
     end;
     FJetFormatSettingsInitialized := true;
   end;
