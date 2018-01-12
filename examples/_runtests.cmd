@@ -11,6 +11,7 @@ call :process PrivateAttrs.sql
 call :process Procedures.sql
 call :process Views.sql
 call :process Constraints.sql
+call :process SpecialCharacters.sql
 goto :eof
 
 :process
@@ -20,7 +21,7 @@ if errorlevel 1 (
   echo %1: execution failed.
   goto :eof
 )
-..\jet.exe dump -f %~dp1Databases\%~n1.mdb -stdo %~dp1Dumps\%~nx1
+..\jet.exe dump --all -f %~dp1Databases\%~n1.mdb -stdo %~dp1Dumps\%~nx1
 if errorlevel 1 (
   echo %1: dump failed.
   goto :eof

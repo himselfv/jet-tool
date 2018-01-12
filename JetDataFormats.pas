@@ -6,13 +6,13 @@ uses SysUtils;
 function JetFormatSettings: TFormatSettings;
 
 function EncodeBin(data: PByte; size: integer): WideString; overload;
-function EncodeBin(data: array of byte): WideString; overload;
+function EncodeBin(const data: array of byte): WideString; overload;
 function EncodeOleBin(data: OleVariant): WideString;
 
 function EncodeComment(str: WideString): WideString;
 function DecodeComment(str: WideString): WideString;
 
-function JetEncodeStr(val: WideString): WideString;
+function JetEncodeStr(const val: WideString): WideString;
 
 function JetEncodeTypedValue(Value: OleVariant; DataType: integer): Widestring;
 function JetEncodeValue(Value: OleVariant): WideString;
@@ -63,7 +63,7 @@ begin
   end;
 end;
 
-function EncodeBin(data: array of byte): WideString; overload;
+function EncodeBin(const data: array of byte): WideString; overload;
 begin
   Result := EncodeBin(@data[0], Length(data));
 end;
@@ -138,28 +138,27 @@ begin
   SetLength(Result, (integer(pc)-integer(@Result[1])) div 2);
 end;
 
-//Encodes a string for inserting into Jet SQL text, escapes special symbols.
-//Some values from ADO/DAO are already escaped so don't overdo it.
-function JetEncodeStr(val: WideString): WideString;
-var isWeird, hasQuotes, hasDQuotes: boolean;
+//Encodes a string value for inserting into Jet SQL text, escapes special symbols.
+//Returns the encoded value, including quotes (when neccessary)
+function JetEncodeStr(const val: WideString): WideString;
+var isWeird, hasQuotes: boolean;
   i: integer;
   c: WideChar;
 begin
-  {
-   Jet SQL doesn't support backslash escapes. Quotes are escaped by doubling them,
-   but there seems to be no docs for anything else.
-   If there's anything weird in the string that'll probably not parse we'll store
-   it as binary (this works fine).
-  }
+  //Jet SQL doesn't support backslash escapes. Quotes are escaped by doubling them:
+  //  ' -> ''
+  //  " -> ""
+  //but there seems to be no docs for anything else.
 
   if val = '' then begin
-    Result := val;
+    Result := '''''';
     exit;
   end;
 
+  //If there's anything weird in the string that probably won't parse, store it
+  //as binary (this works fine).
   isWeird := false;
   hasQuotes := false;
-  hasDQuotes := false;
   for i := 1 to Length(val) do begin
     c := val[i];
     if c < #32 then begin
@@ -168,8 +167,6 @@ begin
     end;
     if c = '''' then
       hasQuotes := true;
-    if c = '"' then
-      hasDQuotes := true;
   end;
 
   if isWeird then begin
@@ -178,10 +175,10 @@ begin
   end;
 
   Result := val;
+  //Only escape 's. "s shouldn't be escaped when wrapping in 's
   if hasQuotes then
     Result := WideReplaceStr(Result, '''', ''''''); //Delphi also escapes quotes this way
-  if hasDQuotes then
-    Result := WideReplaceStr(Result, '"', '""');
+  Result := '''' + Result + '''';
 end;
 
 //Because Delphi does not allow int64(Value).
@@ -217,9 +214,9 @@ begin
     DBTYPE_BYTES:
       Result := EncodeOleBin(Value);
     DBTYPE_WSTR:
-      Result := ''''+JetEncodeStr(Value)+'''';
+      Result := JetEncodeStr(Value)
   else
-    Result := ''''+JetEncodeStr(Value)+''''; //best guess
+    Result := JetEncodeStr(Value); //best guess
   end;
 end;
 
@@ -243,13 +240,13 @@ begin
     varDate:
       Result := '#'+DatetimeToStr(Value, JetFormatSettings)+'#';
     varOleStr, varString:
-      Result := ''''+JetEncodeStr(Value)+'''';
+      Result := JetEncodeStr(Value);
     varBoolean:
       Result := BoolToStr(Value, {UseBoolStrs=}true);
     varArray:
       Result := EncodeOleBin(Value);
   else
-    Result := ''''+JetEncodeStr(Value)+''''; //best guess
+    Result := JetEncodeStr(Value); //best guess
   end;
 end;
 
