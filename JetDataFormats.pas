@@ -57,8 +57,8 @@ begin
   Result[1] := '0';
   Result[2] := 'x';
   for i := 0 to size - 1 do begin
-    Result[2+i*2+0] := HexChars[1+(data^ shr 4)];
-    Result[2+i*2+1] := HexChars[1+(data^ and $0F)];
+    Result[2+i*2+1] := HexChars[1+(data^ shr 4)];
+    Result[2+i*2+2] := HexChars[1+(data^ and $0F)];
     Inc(data);
   end;
 end;
