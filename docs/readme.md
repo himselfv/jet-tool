@@ -132,12 +132,12 @@ You can explicitly set these options via command-line in which case no guessing 
 
 ## Additional information ##
 
-See [[FAQ]] for frequently asked questions and problems.
+See [FAQ](FAQ.md) for frequently asked questions and problems.
 
-See [Limitations](Unsupported) of what the tool can support in the database.
+See [Limitations](Unsupported.md) of what the tool can support in the database.
 
 ## Development ##
-This tool is written in Object Pascal and should probably compile on Delphi 2005+ or compatible FreePascal. If you want to build it from the sources, see [Building notes](Building).
+This tool is written in Object Pascal and should probably compile on Delphi 2005+ or compatible FreePascal. If you want to build it from the sources, see [Building notes](Building.md).
 
 This tool is not being actively developed, but you can contact me if you need an option which is not available.
 

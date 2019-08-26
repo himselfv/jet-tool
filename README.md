@@ -2,4 +2,4 @@ This tool lets you dump MS Access/MS Jet database schema as an SQL file containi
 
 It also lets you execute those files, or any other SQL files, or SQL commands from keyboard.
 
-Usage information is available by doing "`jet help`". See complete help at project wiki.
+Usage information is available by doing "`jet help`". See complete help [in docs folder](docs/readme.md).
