@@ -4,7 +4,7 @@ Console IO, logging and other system facilities.
 }
 
 interface
-uses Windows, UniStrUtils, Jet.CommandLine;
+uses Windows, StringUtils, Jet.CommandLine;
 
 type
  //"Default" states are needed because some defaults are unknown until later.

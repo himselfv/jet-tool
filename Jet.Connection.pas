@@ -4,7 +4,7 @@ Database connection settings and connection procedures.
 }
 
 interface
-uses UniStrUtils, AdoDb, OleDb, ADOX_TLB, DAO_TLB, Jet.CommandLine;
+uses StringUtils, AdoDb, OleDb, ADOX_TLB, DAO_TLB, Jet.CommandLine;
 
 type
  //Multiple database formats are supported by JET/ACE providers.

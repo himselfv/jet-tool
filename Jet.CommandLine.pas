@@ -4,7 +4,7 @@ Command line parsing home.
 }
 
 interface
-uses SysUtils, UniStrUtils;
+uses SysUtils, StringUtils;
 
 type
   EUsage = class(Exception);
